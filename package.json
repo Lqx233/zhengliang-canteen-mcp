@@ -1,9 +1,9 @@
 {
   "name": "zhengliang-canteen-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tenant-neutral MCP server for authorized Digital Canteen staff",
   "author": "luo qixiang",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {
@@ -18,9 +18,11 @@
   ],
   "files": [
     "build/src/",
+    "LICENSE",
     "NOTICE",
     "PRIVACY.md",
     "README.md",
+    "README_EN.md",
     "SECURITY.md"
   ],
   "scripts": {
