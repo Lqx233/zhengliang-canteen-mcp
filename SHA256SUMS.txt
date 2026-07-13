@@ -1,1 +1,1 @@
-1e92264437bf619efcd4c52c5309b7f3fbae7c47f7f0beb584d6dac083048fec  zhengliang-canteen-mcp-1.0.1.tgz
+df90e5f2ba2b1eb9fd16e7c2856778b3bb4919b41aef9319ddb63e70893c4c96  zhengliang-canteen-mcp-1.0.2.tgz

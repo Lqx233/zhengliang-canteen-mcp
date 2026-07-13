@@ -4,8 +4,6 @@
 
 面向数字食堂系统工作人员的本地 MCP 服务。它连接官方数字食堂后台，为已授权用户提供采购、台账、票证、委员会和预警等工具，并通过浏览器完成登录，不要求把系统账号密码交给 MCP 客户端。
 
-作者：**luo qixiang**
-
 ## 主要特性
 
 - 首次连接自动打开官方登录页，账号密码只提交给官方页面。
@@ -30,7 +28,7 @@
 从 GitHub Release 安装当前版本：
 
 ```bash
-npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.1/zhengliang-canteen-mcp-1.0.1.tgz
+npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.2/zhengliang-canteen-mcp-1.0.2.tgz
 ```
 
 确认命令可用：
@@ -166,4 +164,4 @@ npm pack --dry-run
 
 ## 许可证
 
-本项目采用 [MIT License](LICENSE)，Copyright (c) 2026 luo qixiang。
+本项目采用 [MIT License](LICENSE)。

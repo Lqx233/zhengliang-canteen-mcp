@@ -12,5 +12,5 @@ full browser session object, username, password, and tenant name are discarded.
 
 Tenant defaults are encrypted with AES-256-GCM. The data-encryption key and the
 session token are stored under the service name
-`luo-qixiang.zhengliang-canteen-mcp` in the operating-system credential store.
+`zhengliang-canteen-mcp` in the operating-system credential store.
 There is no plaintext fallback.

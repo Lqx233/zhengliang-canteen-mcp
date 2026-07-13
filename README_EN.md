@@ -4,8 +4,6 @@ English | [简体中文](README.md)
 
 A local MCP server for authorized Digital Canteen staff. It connects to the official administration system and provides tools for purchasing, daily ledgers, tickets, committees, and warnings without asking users to give their system passwords to an MCP client.
 
-Author: **luo qixiang**
-
 ## Features
 
 - Opens the official login page automatically on the first connection.
@@ -30,7 +28,7 @@ The packaged implementation is maintained on the [`release/browser-auth-v1`](htt
 Install the current package from GitHub Releases:
 
 ```bash
-npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.1/zhengliang-canteen-mcp-1.0.1.tgz
+npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.2/zhengliang-canteen-mcp-1.0.2.tgz
 ```
 
 Check the installation:
@@ -166,4 +164,4 @@ npm pack --dry-run
 
 ## License
 
-Released under the [MIT License](LICENSE). Copyright (c) 2026 luo qixiang.
+Released under the [MIT License](LICENSE).
