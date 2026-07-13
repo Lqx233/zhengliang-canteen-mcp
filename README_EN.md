@@ -4,8 +4,6 @@ English | [简体中文](README.md)
 
 An open-source local MCP server for authorized Digital Canteen staff. It uses the official browser login flow to obtain the current user's session token and provides purchasing, ledger, ticket, committee, and warning tools without placing system credentials in MCP configuration or project files.
 
-Author: **luo qixiang**
-
 ## Highlights
 
 - Opens the official login page automatically on first connection.
@@ -27,7 +25,7 @@ The complete implementation and development documentation are maintained on the 
 ## Installation
 
 ```bash
-npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.1/zhengliang-canteen-mcp-1.0.1.tgz
+npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.2/zhengliang-canteen-mcp-1.0.2.tgz
 zhengliang-canteen-mcp doctor
 ```
 
@@ -113,4 +111,4 @@ See the release branch's [Chinese documentation](https://github.com/Lqx233/zheng
 
 ## License
 
-Released under the [MIT License](LICENSE). Copyright (c) 2026 luo qixiang.
+Released under the [MIT License](LICENSE).
