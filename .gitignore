@@ -1,0 +1,14 @@
+node_modules/
+build/
+coverage/
+artifacts/
+output/
+*.tgz
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+playwright-report/
+test-results/
+
