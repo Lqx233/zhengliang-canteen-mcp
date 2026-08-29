@@ -14,6 +14,36 @@ A local MCP server for authorized Digital Canteen staff. It connects to the offi
 - Provides the original purchasing, ledger, ticket, committee, and warning tools plus an audited capability registry, read-only generic queries, and two-phase write confirmations.
 - Saves purchase orders as drafts by default and requires explicit confirmation for high-impact writes.
 
+## Client Support
+
+This project connects to the clients below through standard stdio MCP. `setup --clients all` covers every client in the table; you can also select one or more clients. “Automatic” means this project can write or generate the relevant configuration—it does not bypass the client's own official confirmation flow.
+
+| Client | MCP configuration | Skill / materials | Setup behavior |
+| --- | --- | --- | --- |
+| Codex | `codex mcp add` | `~/.codex/skills/zhengliang-canteen/` | Registers MCP and installs the Skill automatically |
+| Claude Code | `claude mcp add --scope user` | — | Registers MCP automatically |
+| Claude Desktop | `claude_desktop_config.json` | — | Merges configuration and backs up the previous file |
+| TraeWork / Trae IDE | Paste JSON in Settings → MCP | `~/.trae/skills/zhengliang-canteen/` | Installs the Skill and prints copy-ready JSON |
+| QoderWork | Paste JSON in Extensions → Connectors | `~/.qoderwork/skills/zhengliang-canteen/` | Installs the Skill and prints copy-ready JSON |
+| Qoder IDE | Paste JSON in MCP settings | `~/.qoder/skills/zhengliang-canteen/` | Installs the Skill and prints copy-ready JSON |
+| Qoder CLI | `qoder mcp add <name> -- <command> <args...>` | `~/.qoder/skills/zhengliang-canteen/` | Installs the Skill and prints an executable command (not JSON) |
+| WorkBuddy | Official Skill / Connectors UI | Reference materials in a temporary directory | Creates reference materials; does not auto-register |
+
+Quick start:
+
+```bash
+# Preview without changing files
+zhengliang-canteen-mcp setup --clients all --dry-run
+
+# Configure every supported client
+zhengliang-canteen-mcp setup --clients all
+
+# Configure selected clients (comma-separated)
+zhengliang-canteen-mcp setup --clients codex,workbuddy
+```
+
+Trae, Qoder, and WorkBuddy still require the final step in their official UI or shell workflow shown by the command. WorkBuddy's `mcp.json` is an example configuration, not a client database file; review it before uploading or importing it.
+
 The packaged implementation is maintained on the [`release/browser-auth-v1`](https://github.com/Lqx233/zhengliang-canteen-mcp/tree/release/browser-auth-v1) branch.
 
 ## Requirements

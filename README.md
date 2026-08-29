@@ -14,6 +14,36 @@
 - 提供原有采购、台账、票证、委员会和预警工具，并增加能力目录、只读通用查询和双阶段确认工作流。
 - 采购订单默认只保存草稿；高影响写操作要求显式确认并在写入后回查。
 
+## 客户端支持
+
+本项目支持通过标准 stdio MCP 接入以下客户端。`setup --clients all` 会覆盖下表中的全部客户端；也可以只选择一个或多个客户端。表中的“自动”仅表示本项目可以写入或生成对应配置，不代表客户端会跳过其官方确认流程。
+
+| 客户端 | MCP 配置方式 | Skill / 材料 | 配置器行为 |
+| --- | --- | --- | --- |
+| Codex | `codex mcp add` | `~/.codex/skills/zhengliang-canteen/` | 自动注册 MCP，并安装 Skill |
+| Claude Code | `claude mcp add --scope user` | — | 自动注册 MCP |
+| Claude Desktop | `claude_desktop_config.json` | — | 自动合并配置并备份旧文件 |
+| TraeWork / Trae IDE | Settings → MCP 粘贴 JSON | `~/.trae/skills/zhengliang-canteen/` | 安装 Skill，打印待粘贴 JSON |
+| QoderWork | Extensions → Connectors → Paste JSON | `~/.qoderwork/skills/zhengliang-canteen/` | 安装 Skill，打印待粘贴 JSON |
+| Qoder IDE | MCP 设置页粘贴 JSON | `~/.qoder/skills/zhengliang-canteen/` | 安装 Skill，打印待粘贴 JSON |
+| Qoder CLI | `qoder mcp add <name> -- <command> <args...>` | `~/.qoder/skills/zhengliang-canteen/` | 安装 Skill，打印可执行命令（不接受 JSON） |
+| WorkBuddy | 官方 Skill / Connectors 界面 | 临时目录中的参考材料 | 生成参考材料，不自动注册 |
+
+快速开始：
+
+```bash
+# 预览，不写入配置
+zhengliang-canteen-mcp setup --clients all --dry-run
+
+# 一次配置所有支持的客户端
+zhengliang-canteen-mcp setup --clients all
+
+# 只配置指定客户端（逗号分隔）
+zhengliang-canteen-mcp setup --clients codex,workbuddy
+```
+
+Trae、Qoder 和 WorkBuddy 仍需按照命令输出，在各自官方界面完成最后一步。WorkBuddy 材料包中的 `mcp.json` 是示例配置，不是客户端数据库文件；上传或导入前请先审核内容。
+
 实现源码位于 [`release/browser-auth-v1`](https://github.com/Lqx233/zhengliang-canteen-mcp/tree/release/browser-auth-v1) 分支。
 
 ## 系统要求
