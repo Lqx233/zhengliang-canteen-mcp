@@ -20,7 +20,7 @@
 
 - macOS 或 Windows 10/11
 - Node.js 20、22 或 24
-- 已安装至少一个 MCP 客户端：Codex、Claude Code 或 Claude Desktop
+- 已安装至少一个 MCP 客户端：Codex、Claude Code、Claude Desktop、TraeWork、QoderWork 或 WorkBuddy
 - 拥有数字食堂系统的合法账号和访问权限
 
 ## 安装
@@ -54,6 +54,9 @@ zhengliang-canteen-mcp setup --clients codex
 zhengliang-canteen-mcp setup --clients claude-code
 zhengliang-canteen-mcp setup --clients claude-desktop
 zhengliang-canteen-mcp setup --clients codex,claude-code
+zhengliang-canteen-mcp setup --clients trae
+zhengliang-canteen-mcp setup --clients qoder
+zhengliang-canteen-mcp setup --clients workbuddy
 ```
 
 配置前预览所有变化：
@@ -63,6 +66,8 @@ zhengliang-canteen-mcp setup --clients all --dry-run
 ```
 
 执行完成后重启对应的 MCP 客户端。
+
+Trae/Qoder 的配置器会安装用户级 Skill，并打印官方 MCP 设置页可复制的 JSON 或 Qoder CLI 命令。WorkBuddy 会在系统临时目录生成参考材料包（包含 `skill.yml`、`SKILL.md`、工作流参考和示例 `mcp.json`）；这些材料不会自动注册，WorkBuddy 本身的设置仍需在官方界面中人工导入。
 
 ## 手动配置
 
@@ -113,6 +118,23 @@ claude mcp add --scope user zhengliang-canteen-packaged -- zhengliang-canteen-mc
   }
 }
 ```
+
+### TraeWork / Trae IDE
+
+运行 `zhengliang-canteen-mcp setup --clients trae`，然后在 Trae 的 Settings → MCP 中添加自定义服务器并粘贴命令输出的 JSON。Skill 会安装到用户级目录 `~/.trae/skills/zhengliang-canteen/`。Trae 不接受包含空格的 `command`；如果 Node.js 的绝对路径含空格，配置器会自动改用 `node`，保留 CLI 的绝对路径作为参数，此时必须确保 Node.js 位于 Trae 可见的 `PATH` 中。TraeWork 的 Local/Cloud 运行环境由官方客户端选择；本地 stdio MCP 只能在 Local 环境使用。
+
+### QoderWork / Qoder IDE / Qoder CLI
+
+运行 `zhengliang-canteen-mcp setup --clients qoder`。Skill 会分别安装到：
+
+- QoderWork：`~/.qoderwork/skills/zhengliang-canteen/`
+- Qoder IDE/CLI：`~/.qoder/skills/zhengliang-canteen/`
+
+随后在 QoderWork 的 Extensions → Connectors → + Add → Paste JSON Config，或 Qoder IDE 的 MCP 设置中粘贴命令输出的 JSON。Qoder CLI 不接受这段 JSON；请使用配置器打印的 `qoder mcp add <name> -- <command> <args...>` 命令，并确保 `PLAYWRIGHT_BROWSERS_PATH` 已在运行环境中设置。
+
+### WorkBuddy
+
+运行 `zhengliang-canteen-mcp setup --clients workbuddy`，命令会生成一个临时目录并打印路径。将其中的 `skill.yml`、`SKILL.md` 和 `references/` 作为参考材料通过 WorkBuddy 官方 Skill 界面上传；`mcp.json` 仅是示例，如果 Connectors 页面提供自定义 MCP 导入，请在官方界面中审核后手动导入。命令不会自动注册 WorkBuddy 设置，包内不含账号、密码或会话 token。
 
 ## 首次登录
 

@@ -20,7 +20,7 @@ The packaged implementation is maintained on the [`release/browser-auth-v1`](htt
 
 - macOS or Windows 10/11
 - Node.js 20, 22, or 24
-- Codex, Claude Code, or Claude Desktop
+- Codex, Claude Code, Claude Desktop, TraeWork, QoderWork, or WorkBuddy
 - A legitimate account authorized to access the Digital Canteen system
 
 ## Installation
@@ -54,6 +54,9 @@ zhengliang-canteen-mcp setup --clients codex
 zhengliang-canteen-mcp setup --clients claude-code
 zhengliang-canteen-mcp setup --clients claude-desktop
 zhengliang-canteen-mcp setup --clients codex,claude-code
+zhengliang-canteen-mcp setup --clients trae
+zhengliang-canteen-mcp setup --clients qoder
+zhengliang-canteen-mcp setup --clients workbuddy
 ```
 
 Preview configuration changes without writing them:
@@ -63,6 +66,8 @@ zhengliang-canteen-mcp setup --clients all --dry-run
 ```
 
 Restart the configured MCP client after setup completes.
+
+Trae/Qoder setup installs user-level Skills and prints copy-ready JSON for the official MCP settings UI or an exact Qoder CLI command. WorkBuddy setup creates a temporary reference-materials bundle containing `skill.yml`, `SKILL.md`, workflow references, and an example `mcp.json`; nothing is registered automatically, and WorkBuddy settings are still imported manually through its official UI.
 
 ## Manual Configuration
 
@@ -113,6 +118,23 @@ Add the entry below. If the desktop application cannot resolve shell PATH entrie
   }
 }
 ```
+
+### TraeWork / Trae IDE
+
+Run `zhengliang-canteen-mcp setup --clients trae`, then open Settings → MCP in Trae and paste the JSON printed by the command. The Skill is installed at `~/.trae/skills/zhengliang-canteen/`. Trae rejects a `command` containing spaces; when the absolute Node.js path contains spaces, setup automatically uses `node` and keeps the absolute CLI path in `args`, so Node.js must be available on Trae's `PATH`. TraeWork's Local/Cloud execution mode is selected by the official client; local stdio MCP servers require Local mode.
+
+### QoderWork / Qoder IDE / Qoder CLI
+
+Run `zhengliang-canteen-mcp setup --clients qoder`. Skills are installed at:
+
+- QoderWork: `~/.qoderwork/skills/zhengliang-canteen/`
+- Qoder IDE/CLI: `~/.qoder/skills/zhengliang-canteen/`
+
+In QoderWork, use Extensions → Connectors → + Add → Paste JSON Config. In Qoder IDE, use the MCP settings page and paste the JSON. Qoder CLI does not accept that JSON; run the exact `qoder mcp add <name> -- <command> <args...>` command printed by setup, with `PLAYWRIGHT_BROWSERS_PATH` set in its runtime environment.
+
+### WorkBuddy
+
+Run `zhengliang-canteen-mcp setup --clients workbuddy`. The command creates a temporary reference-materials directory and prints its path. Upload `skill.yml`, `SKILL.md`, and `references/` through WorkBuddy's official Skill interface. `mcp.json` is an example only; if Connectors exposes custom MCP import, review it and import it manually through the official UI. The command does not register WorkBuddy settings, and the materials contain no account, password, or session token.
 
 ## First Login
 
