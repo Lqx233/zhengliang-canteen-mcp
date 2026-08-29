@@ -1,21 +1,17 @@
-const TOKEN_KEYS = /^(admin-authorization|authorization|token|password|secret)$/i;
+import { scrubSecrets } from "./redaction.js";
+
 const PHONE = /(?<!\d)1\d{10}(?!\d)/g;
 
 function scrub(value: unknown, key = ""): unknown {
-  if (TOKEN_KEYS.test(key)) return "[REDACTED]";
-  if (typeof value === "string") {
-    return value
-      .replace(PHONE, "[PHONE]")
-      .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-      .replace(/Admin-Authorization["':\s]+[^\s,}]+/gi, "Admin-Authorization: [REDACTED]");
-  }
-  if (Array.isArray(value)) return value.map((item) => scrub(item));
-  if (value && typeof value === "object") {
+  const safe = scrubSecrets(value, key);
+  if (typeof safe === "string") return safe.replace(PHONE, "[PHONE]");
+  if (Array.isArray(safe)) return safe.map((item) => scrub(item));
+  if (safe && typeof safe === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [childKey, scrub(child, childKey)]),
+      Object.entries(safe as Record<string, unknown>).map(([childKey, child]) => [childKey, scrub(child, childKey)]),
     );
   }
-  return value;
+  return safe;
 }
 
 export function log(event: string, details: Record<string, unknown> = {}): void {

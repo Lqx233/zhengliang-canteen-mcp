@@ -60,5 +60,6 @@ export interface RequestOptions {
 export interface ToolResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }

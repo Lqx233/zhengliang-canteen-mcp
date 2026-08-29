@@ -11,7 +11,7 @@ A local MCP server for authorized Digital Canteen staff. It connects to the offi
 - Stores tokens in macOS Keychain or Windows Credential Manager for reuse across sessions.
 - Encrypts tenant-specific settings with AES-256-GCM; the key stays in the operating-system credential store.
 - Discovers suppliers and warehouses dynamically instead of shipping tenant-specific mappings.
-- Provides 28 MCP tools for purchasing, ledgers, tickets, committees, and warnings.
+- Provides the original purchasing, ledger, ticket, committee, and warning tools plus an audited capability registry, read-only generic queries, and two-phase write confirmations.
 - Saves purchase orders as drafts by default and requires explicit confirmation for high-impact writes.
 
 The packaged implementation is maintained on the [`release/browser-auth-v1`](https://github.com/Lqx233/zhengliang-canteen-mcp/tree/release/browser-auth-v1) branch.
@@ -28,7 +28,7 @@ The packaged implementation is maintained on the [`release/browser-auth-v1`](htt
 Install the current package from GitHub Releases:
 
 ```bash
-npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.2/zhengliang-canteen-mcp-1.0.2.tgz
+npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.1.0/zhengliang-canteen-mcp-1.1.0.tgz
 ```
 
 Check the installation:
@@ -143,6 +143,11 @@ zhengliang-canteen-mcp profile configure
 - Tickets: `scan_missing_tickets`, `get_order_ticket`, `update_order_ticket`
 - Committees: `get_committee`, `save_committee`
 - Warnings: `list_warnings`, `handle_warning`
+- Capability and safety workflow: `list_capabilities`, `query_capability`, `prepare_action`, `execute_action`
+
+The `zhengliang://capabilities` and `zhengliang://security` resources expose the reviewed capability surface and safety boundary. The `canteen_workflow` prompt guides read-first, confirmation-gated use. New writes are not enabled through arbitrary generic execution and must use a dedicated safety-checked tool.
+
+`query_capability` accepts only a capability ID and capability-specific validated `params`. Write capabilities marked `confirmable` use `prepare_action`/`execute_action`; capabilities marked `dedicated` continue to use their named tool and built-in gates.
 
 ## Privacy and Security
 
@@ -160,6 +165,7 @@ See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for details.
 npm install
 npm run verify
 npm pack --dry-run
+npm run audit:site
 ```
 
 ## License

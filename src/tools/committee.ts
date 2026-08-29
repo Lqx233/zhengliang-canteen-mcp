@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ToolContext, ToolDefinition } from "./shared.js";
-import { apiRows, apiSucceeded, err, ok, sleep } from "./shared.js";
+import { apiRows, apiSucceeded, err, ok, sleep, verifiedWrite } from "./shared.js";
 
 const DIET_POSITIONS: Record<string, number> = { 主任: 1, 副主任: 2, 成员: 3 };
 const REPRESENTATIVES: Record<string, number> = { 教师代表: 1, 家长代表: 2, 社区代表: 3, 学生代表: 4, 学校代表: 5, 食堂代表: 6, 食安管理员: 7 };
@@ -38,6 +38,7 @@ const parentMemberSchema = z.object({
 export const COMMITTEE_TOOLS: ToolDefinition[] = [
   {
     name: "get_committee",
+    effect: "read",
     description: "查询膳食委员会或家长监督委员会任期和成员；可读取上届模板。",
     schema: { kind: z.enum(["diet", "parent"]), semester: z.string().optional(), withPrevMembers: z.boolean().optional().default(false) },
     async handler(args, context) {
@@ -65,6 +66,7 @@ export const COMMITTEE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "save_committee",
+    effect: "remote-write",
     description: "保存已有任期的委员会成员；confirm:false 仅预览，confirm:true 才写入并回查。",
     schema: { kind: z.enum(["diet", "parent"]), semester: z.string().optional(), members: z.array(z.unknown()).min(1), committeeId: z.union([z.string(), z.number()]).optional(), confirm: z.boolean().default(false) },
     async handler(args, context) {
@@ -92,7 +94,7 @@ export const COMMITTEE_TOOLS: ToolDefinition[] = [
         await sleep(1800);
         const after = (await dietTerms(context)).find((item) => item.committeeName === args.semester);
         const names = new Set((after?.itemList ?? []).map((item: any) => item.name));
-        return ok({ action: "saved", kind: "diet", verification: { passed: members.every((member) => names.has(member.name)), memberCount: after?.itemList?.length ?? 0 } });
+        return verifiedWrite("Diet committee write was accepted but verification failed", { action: "saved", kind: "diet" }, { passed: members.every((member) => names.has(member.name)), memberCount: after?.itemList?.length ?? 0 });
       }
 
       const parsed = z.array(parentMemberSchema).safeParse(args.members);
@@ -124,7 +126,7 @@ export const COMMITTEE_TOOLS: ToolDefinition[] = [
       await sleep(1800);
       const after = await parentMembers(context, String(term.id));
       const names = new Set(after.map((item) => item.name));
-      return ok({ action: "saved", kind: "parent", verification: { passed: members.every((member) => names.has(member.name)), memberCount: after.length } });
+      return verifiedWrite("Parent committee write was accepted but verification failed", { action: "saved", kind: "parent" }, { passed: members.every((member) => names.has(member.name)), memberCount: after.length });
     },
   },
 ];

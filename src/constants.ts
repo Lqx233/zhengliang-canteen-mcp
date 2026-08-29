@@ -1,6 +1,6 @@
 export const APP_NAME = "zhengliang-canteen-mcp";
 export const MCP_REGISTRATION_NAME = "zhengliang-canteen-packaged";
-export const VERSION = "1.0.2";
+export const VERSION = "1.1.0";
 export const BASE_URL = "https://admin.zhenglianginfo.com";
 export const LOGIN_URL = `${BASE_URL}/web/user/login`;
 export const AUTH_STORAGE_KEY = "canteen-authority";

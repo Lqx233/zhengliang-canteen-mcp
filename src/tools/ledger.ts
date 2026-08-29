@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ToolContext, ToolDefinition } from "./shared.js";
-import { apiRows, apiSucceeded, dateBack, err, ok, requireProfile, sleep, today } from "./shared.js";
+import { apiRows, apiSucceeded, dateBack, err, ok, requireProfile, sleep, today, verifiedWrite } from "./shared.js";
 
 export function staffTemperature(index: number, min = 36.2, max = 37.1): string {
   const steps = Math.max(1, Math.round((max - min) * 10));
@@ -89,6 +89,7 @@ const LEDGER_ENDPOINTS: Record<string, string> = {
 export const LEDGER_TOOLS: ToolDefinition[] = [
   {
     name: "save_morning_check",
+    effect: "remote-write",
     description: "使用最近完整模板保存人员晨检并回查；已有记录默认跳过，重建必须 force:true 和 confirm:true。",
     schema: {
       date: z.string().optional(), checker: z.string().optional(), tempRange: z.tuple([z.number(), z.number()]).optional(), timeRange: z.tuple([z.string(), z.string()]).optional(),
@@ -130,11 +131,12 @@ export const LEDGER_TOOLS: ToolDefinition[] = [
       const after = staffRecords(await staffDetail(context, date));
       const parsed = after.map((item) => parseJson(item.value));
       const passed = after.length === records.length && parsed.every((row) => Number(row.temperature) >= min && Number(row.temperature) <= max && String(row.attendanceTime) >= `${timeStart}:00` && String(row.attendanceTime) < `${timeEnd}:00`);
-      return ok({ action: "created", date, templateDate: template.date, count: records.length, verification: { passed } });
+      return verifiedWrite("Morning-check write was accepted but verification failed", { action: "created", date, templateDate: template.date, count: records.length }, { passed });
     },
   },
   {
     name: "save_device_disinfection",
+    effect: "remote-write",
     description: "使用最近设备模板保存清洗消毒记录并回查；已有记录默认跳过。",
     schema: { date: z.string().optional(), selectTime: z.string().optional(), duration: z.number().int().positive().optional(), force: z.boolean().optional() },
     async handler(args, context) {
@@ -157,11 +159,12 @@ export const LEDGER_TOOLS: ToolDefinition[] = [
       let after = await deviceDetail(context, date);
       if (!deviceItems(after).length) { await sleep(1800); after = await deviceDetail(context, date); }
       const passed = deviceItems(after).length === items.length && deviceItems(after).every((item) => item.selectTime === selectTime && Number(item.duration) === duration);
-      return ok({ action: "created", date, templateDate: template.date, count: items.length, verification: { passed } });
+      return verifiedWrite("Device-disinfection write was accepted but verification failed", { action: "created", date, templateDate: template.date, count: items.length }, { passed });
     },
   },
   {
     name: "save_waste_disposal",
+    effect: "remote-write",
     description: "保存三类废弃物实际数量并回查；快速填报必须先在加密配置中启用。",
     schema: {
       date: z.string().optional(), amounts: z.object({ 餐厨: z.number().nonnegative(), 食材废料: z.number().nonnegative(), 其他: z.number().nonnegative() }).optional(),
@@ -192,11 +195,12 @@ export const LEDGER_TOOLS: ToolDefinition[] = [
       const after = wasteValue(await wasteDetail(context, date));
       const actual = after?.wasteDisposalDtlList ?? [];
       const passed = actual.length === 3 && actual.every((item: any) => item.unit === unit && item.disposalTime === disposalTime) && Number(after?.dinersCount) === dinersCount;
-      return ok({ action: "created", date, amounts, verification: { passed } });
+      return verifiedWrite("Waste-disposal write was accepted but verification failed", { action: "created", date, amounts }, { passed });
     },
   },
   {
     name: "list_ledger_records",
+    effect: "read",
     description: "按台账名称和日期范围查询记录。",
     schema: { ledgerName: z.string().min(1), days: z.number().int().positive().optional(), endDate: z.string().optional(), pageIndex: z.number().int().positive().optional(), pageSize: z.number().int().positive().max(200).optional() },
     async handler(args, context) {

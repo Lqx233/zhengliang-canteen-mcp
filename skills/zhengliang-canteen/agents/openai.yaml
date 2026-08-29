@@ -1,0 +1,6 @@
+interface:
+  display_name: "Zhengliang Digital Canteen"
+  short_description: "Safe read-first canteen operations"
+  default_prompt: "Use $zhengliang-canteen to inspect the current canteen state and follow confirmation gates for any requested write."
+policy:
+  allow_implicit_invocation: true

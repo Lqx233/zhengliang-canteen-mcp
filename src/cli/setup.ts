@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,14 @@ export interface SetupOptions {
 
 function cliPath(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
+}
+
+export function packagedSkillPathFromCompiledDirectory(directory: string, pathApi: typeof path = path): string {
+  return pathApi.join(directory, "..", "..", "..", "skills", "zhengliang-canteen");
+}
+
+function packagedSkillPath(): string {
+  return packagedSkillPathFromCompiledDirectory(path.dirname(fileURLToPath(import.meta.url)));
 }
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
@@ -48,6 +57,44 @@ async function configureCodex(dryRun: boolean): Promise<void> {
   if (!await commandExists("codex")) return void process.stdout.write("Codex CLI not found; skipped Codex registration.\n");
   await run("codex", ["mcp", "remove", MCP_REGISTRATION_NAME]);
   if (await run("codex", args) !== 0) throw new Error("Codex MCP registration failed");
+}
+
+export async function installCodexSkill(dryRun: boolean, options: { homeDir?: string; now?: Date; rename?: (source: string, destination: string) => Promise<void> } = {}): Promise<void> {
+  const source = packagedSkillPath();
+  const target = path.join(options.homeDir ?? os.homedir(), ".codex", "skills", "zhengliang-canteen");
+  if (dryRun) return void process.stdout.write(`[dry-run] copy ${source} to ${target} (backup existing target)\n`);
+  const parent = path.dirname(target);
+  const staging = path.join(parent, `.zhengliang-canteen.install-${process.pid}-${crypto.randomUUID()}`);
+  const rename = options.rename ?? ((source: string, destination: string) => fs.rename(source, destination));
+  await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+  await fs.cp(source, staging, { recursive: true, errorOnExist: true });
+  let backup: string | null = null;
+  try {
+    try {
+      await fs.access(target);
+      backup = `${target}.backup-${(options.now ?? new Date()).toISOString().replace(/[:.]/g, "-")}`;
+      await rename(target, backup);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    try {
+      await rename(staging, target);
+    } catch (error) {
+      if (backup) {
+        try {
+          await rename(backup, target);
+        } catch (restoreError) {
+          throw new AggregateError([error, restoreError], `Skill activation failed and the previous copy remains at ${backup}`);
+        }
+      }
+      throw error;
+    }
+    if (backup) process.stdout.write(`Existing Codex skill backed up to ${backup}.\n`);
+  } catch (error: any) {
+    throw error;
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true });
+  }
 }
 
 async function configureClaudeCode(dryRun: boolean): Promise<void> {
@@ -85,7 +132,10 @@ async function configureClaudeDesktop(dryRun: boolean): Promise<void> {
 export async function setup(options: SetupOptions): Promise<void> {
   await installBrowser(options.dryRun);
   const clients = new Set(options.clients);
-  if (clients.has("all") || clients.has("codex")) await configureCodex(options.dryRun);
+  if (clients.has("all") || clients.has("codex")) {
+    await configureCodex(options.dryRun);
+    await installCodexSkill(options.dryRun);
+  }
   if (clients.has("all") || clients.has("claude") || clients.has("claude-code")) await configureClaudeCode(options.dryRun);
   if (clients.has("all") || clients.has("claude") || clients.has("claude-desktop")) await configureClaudeDesktop(options.dryRun);
   process.stdout.write(options.dryRun ? "Dry run complete.\n" : "Setup complete. Restart MCP clients to connect.\n");

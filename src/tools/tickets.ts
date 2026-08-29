@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "./shared.js";
-import { apiRows, apiSucceeded, err, ok, sleep } from "./shared.js";
+import { apiRows, apiSucceeded, err, ok, sleep, verifiedWrite } from "./shared.js";
 
 function needsTicket(order: any): boolean {
   return [4, 5].includes(Number(order.status)) && Number(order.ticketTotal ?? 0) === 0;
@@ -23,9 +23,17 @@ function flattenCertificates(data: any): any[] {
   ];
 }
 
+function certificateIdentity(item: any): string | null {
+  for (const key of ["id", "certificateId", "fileId", "url"]) {
+    if (item?.[key] !== undefined && item?.[key] !== null && String(item[key])) return `${key}:${String(item[key])}`;
+  }
+  return null;
+}
+
 export const TICKET_TOOLS: ToolDefinition[] = [
   {
     name: "scan_missing_tickets",
+    effect: "read",
     description: "扫描指定日期范围内已配送/已完成订单，列出 ticketTotal=0 的缺证订单。",
     schema: {
       startDate: z.string().min(1), endDate: z.string().min(1), statusList: z.array(z.number().int()).optional(), pageSize: z.number().int().positive().max(200).optional(),
@@ -67,6 +75,7 @@ export const TICKET_TOOLS: ToolDefinition[] = [
   },
   {
     name: "get_order_ticket",
+    effect: "read",
     description: "按 orderCode 或 queryTicketId 查询订单票证和合格证。",
     schema: { orderCode: z.string().optional(), queryTicketId: z.number().int().optional(), queryTicketType: z.number().int().optional() },
     async handler(args, context) {
@@ -81,6 +90,7 @@ export const TICKET_TOOLS: ToolDefinition[] = [
   },
   {
     name: "update_order_ticket",
+    effect: "remote-write",
     description: "更新订单票证；必须 confirm:true，并在写入后回查。",
     schema: { orderCode: z.string().optional(), queryTicketId: z.number().int().optional(), queryTicketType: z.number().int().optional(), certificateList: z.array(z.unknown()).optional(), confirm: z.boolean().default(false) },
     async handler(args, context) {
@@ -103,7 +113,20 @@ export const TICKET_TOOLS: ToolDefinition[] = [
       await sleep(1800);
       const after = await context.session.call(path, { operation: "read" });
       const certificates = flattenCertificates(after.json?.data ?? {});
-      return ok({ action: "updated", ...target, verification: { passed: apiSucceeded(after.json), certificateCount: certificates.length, ticketTotal: after.json?.data?.ticketTotal ?? certificates.length } });
+      const expectedCertificates = payload.certificateList;
+      const expectedIdentities: string[] = expectedCertificates.map(certificateIdentity).filter((value: string | null): value is string => Boolean(value));
+      const actualIdentities = new Set(certificates.map(certificateIdentity).filter((value: string | null): value is string => Boolean(value)));
+      const checks = {
+        querySucceeded: apiSucceeded(after.json),
+        certificateCount: certificates.length === expectedCertificates.length,
+        certificateIdentities: expectedIdentities.every((value) => actualIdentities.has(value)),
+      };
+      return verifiedWrite("Ticket update was accepted but verification failed", { action: "updated", ...target }, {
+        passed: Object.values(checks).every(Boolean),
+        checks,
+        certificateCount: certificates.length,
+        ticketTotal: after.json?.data?.ticketTotal ?? certificates.length,
+      });
     },
   },
 ];

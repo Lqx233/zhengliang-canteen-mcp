@@ -11,7 +11,7 @@
 - token 可跨会话复用；服务端判定失效后才重新打开登录页。
 - 学校专属配置使用 AES-256-GCM 加密，密钥存入操作系统凭据库。
 - 动态读取当前账号可见的供应商和仓库，不内置学校、人员或供应商数据。
-- 提供 28 个 MCP 工具，覆盖采购、日常台账、票证、委员会和预警。
+- 提供原有采购、台账、票证、委员会和预警工具，并增加能力目录、只读通用查询和双阶段确认工作流。
 - 采购订单默认只保存草稿；高影响写操作要求显式确认并在写入后回查。
 
 实现源码位于 [`release/browser-auth-v1`](https://github.com/Lqx233/zhengliang-canteen-mcp/tree/release/browser-auth-v1) 分支。
@@ -28,7 +28,7 @@
 从 GitHub Release 安装当前版本：
 
 ```bash
-npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.0.2/zhengliang-canteen-mcp-1.0.2.tgz
+npm install -g https://github.com/Lqx233/zhengliang-canteen-mcp/releases/download/v1.1.0/zhengliang-canteen-mcp-1.1.0.tgz
 ```
 
 确认命令可用：
@@ -143,6 +143,11 @@ zhengliang-canteen-mcp profile configure
 - 票证：`scan_missing_tickets`、`get_order_ticket`、`update_order_ticket`
 - 委员会：`get_committee`、`save_committee`
 - 预警：`list_warnings`、`handle_warning`
+- 能力与安全工作流：`list_capabilities`、`query_capability`、`prepare_action`、`execute_action`
+
+`zhengliang://capabilities` 和 `zhengliang://security` resources 提供当前审计能力与安全边界；`canteen_workflow` prompt 用于引导读优先和确认门控流程。新增写能力默认不开放通用执行，必须使用其专用工具。
+
+`query_capability` 仅接受能力 ID 和经该能力严格校验的 `params`。标记为 `confirmable` 的写能力使用 `prepare_action`/`execute_action`；标记为 `dedicated` 的能力继续使用其专用工具和内置门禁。
 
 ## 隐私与安全
 
@@ -160,6 +165,7 @@ zhengliang-canteen-mcp profile configure
 npm install
 npm run verify
 npm pack --dry-run
+npm run audit:site
 ```
 
 ## 许可证

@@ -4,6 +4,8 @@ import type { ProfileWizard } from "../config/wizard.js";
 import type { ProfileVault } from "../config/vault.js";
 import type { Session } from "../session.js";
 import type { TenantProfile, ToolResult } from "../types.js";
+import { scrubSecrets } from "../redaction.js";
+export { scrubSecrets } from "../redaction.js";
 
 export interface ToolContext {
   session: Session;
@@ -14,20 +16,35 @@ export interface ToolContext {
 
 export interface ToolDefinition {
   name: string;
+  effect: "read" | "preview" | "local-write" | "local-destructive" | "remote-write" | "remote-delete";
   description: string;
   schema: Record<string, z.ZodType>;
   handler: (args: any, context: ToolContext) => Promise<ToolResult>;
 }
 
 export function ok(value: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+  const safe = scrubSecrets(value);
+  const structuredContent = safe && typeof safe === "object" && !Array.isArray(safe) ? safe as Record<string, unknown> : { value: safe };
+  return { content: [{ type: "text", text: JSON.stringify(safe, null, 2) }], structuredContent };
 }
 
 export function err(message: string, details?: unknown): ToolResult {
+  const safe = scrubSecrets({ error: message, details });
   return {
-    content: [{ type: "text", text: JSON.stringify({ error: message, details }, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(safe, null, 2) }],
+    structuredContent: safe as Record<string, unknown>,
     isError: true,
   };
+}
+
+export function verifiedWrite(
+  failureMessage: string,
+  value: Record<string, unknown>,
+  verification: Record<string, unknown> & { passed: boolean },
+): ToolResult {
+  const result = { ...value, verification };
+  if (verification.passed === true) return ok(result);
+  return err(failureMessage, { writeAccepted: true, ...result });
 }
 
 export function apiSucceeded(json: any): boolean {

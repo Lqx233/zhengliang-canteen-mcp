@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { containsSensitiveFields, isSensitiveKey } from "../redaction.js";
 import type { ToolDefinition } from "./shared.js";
 import { apiRows, apiSucceeded, err, ok } from "./shared.js";
 
@@ -41,6 +42,7 @@ const RAW_READ_ENDPOINTS = new Map<string, Set<string>>([
 export const BASE_TOOLS: ToolDefinition[] = [
   {
     name: "login",
+    effect: "local-write",
     description: "打开官方数字食堂登录页并安全保存当前会话；不会返回 token。",
     schema: { force: z.boolean().optional().default(false) },
     async handler(args, context) {
@@ -51,6 +53,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "auth_status",
+    effect: "read",
     description: "返回本机 MCP 认证状态，不暴露账号、学校或 token。",
     schema: {},
     async handler(_args, context) {
@@ -59,6 +62,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "logout",
+    effect: "local-destructive",
     description: "删除本机保存的登录 token。必须 confirm:true。",
     schema: { confirm: z.boolean().default(false) },
     async handler(args, context) {
@@ -69,6 +73,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "open_profile_setup",
+    effect: "local-write",
     description: "打开本机加密配置向导，确认采购、仓库和台账默认值。",
     schema: {},
     async handler(_args, context) {
@@ -79,6 +84,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "list_suppliers",
+    effect: "read",
     description: "实时查询当前账号可用的线上供应商。",
     schema: {},
     async handler(_args, context) {
@@ -88,6 +94,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "list_warehouses",
+    effect: "read",
     description: "实时查询仓库候选；收货人以本机已确认配置为准。",
     schema: {},
     async handler(_args, context) {
@@ -98,6 +105,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "list_orders",
+    effect: "read",
     description: "按状态和日期查询采购订单列表。",
     schema: {
       statusList: z.array(z.number().int()).min(1),
@@ -127,6 +135,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "order_counts",
+    effect: "read",
     description: "查询各采购订单状态的实时计数。",
     schema: {},
     async handler(_args, context) {
@@ -137,6 +146,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "query_goods",
+    effect: "read",
     description: "按实时供应商编码、商品名和可选单位查询商品目录。",
     schema: {
       enterpriseCode: z.string().min(1),
@@ -164,6 +174,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "get_order",
+    effect: "read",
     description: "按 orderCode 查询采购订单详情。",
     schema: { orderCode: z.string().min(1) },
     async handler(args, context) {
@@ -174,6 +185,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "verify_order",
+    effect: "read",
     description: "按期望字段验收订单详情，只比较明确传入的字段。",
     schema: {
       orderCode: z.string().min(1),
@@ -202,6 +214,7 @@ export const BASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "raw_request",
+    effect: "read",
     description: "调用严格白名单内的只读接口；未知或写入接口会拒绝。",
     schema: { path: z.string().min(1), method: z.enum(["GET", "POST"]).optional(), body: z.unknown().optional() },
     async handler(args, context) {
@@ -209,6 +222,8 @@ export const BASE_TOOLS: ToolDefinition[] = [
       const method = args.method ?? "GET";
       const allowed = RAW_READ_ENDPOINTS.get(parsed.pathname);
       if (!allowed?.has(method)) return err("Endpoint is not in the read-only allowlist");
+      if ([...parsed.searchParams.keys()].some((key) => isSensitiveKey(key))) return err("Sensitive values are not allowed in raw_request query parameters");
+      if (containsSensitiveFields(args.body)) return err("Sensitive values are not allowed in raw_request bodies");
       const response = await context.session.call(`${parsed.pathname}${parsed.search}`, { method, body: args.body, operation: "read" });
       return ok({ httpStatus: response.httpStatus, data: response.json });
     },

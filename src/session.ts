@@ -62,8 +62,12 @@ export class Session {
       if (!force) {
         const tokenFromOtherProcess = await this.secrets.getToken(this.profile);
         if (tokenFromOtherProcess) {
-          this.token = tokenFromOtherProcess;
-          return tokenFromOtherProcess;
+          const validation = await this.api.request("/auth/groups/getUserGroupAuth", { token: tokenFromOtherProcess });
+          if (!isAuthFailure(validation)) {
+            this.token = tokenFromOtherProcess;
+            return tokenFromOtherProcess;
+          }
+          await this.secrets.deleteToken(this.profile);
         }
       }
       const token = await this.browserAuth.login();

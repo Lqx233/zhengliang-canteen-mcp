@@ -2,7 +2,7 @@ import { z } from "zod";
 import { findWarehouse } from "../config/profile.js";
 import type { SupplierInfo, TenantProfile } from "../types.js";
 import type { ToolContext, ToolDefinition } from "./shared.js";
-import { apiRows, apiSucceeded, err, ok, requireProfile, sleep } from "./shared.js";
+import { apiRows, apiSucceeded, err, ok, requireProfile, sleep, verifiedWrite } from "./shared.js";
 
 const confirmedGoodsSchema = z.object({ code: z.string().min(1), name: z.string().min(1), unit: z.string().min(1) });
 const itemOptionsSchema = z.object({
@@ -201,12 +201,14 @@ function sameGoods(detail: any, mappings: any[]): boolean {
 export const PURCHASE_TOOLS: ToolDefinition[] = [
   {
     name: "merge_items",
+    effect: "read",
     description: "合并相同用户名称和保存单位的采购明细。",
     schema: { items: z.array(itemSchema).min(1) },
     async handler(args) { return ok({ originalCount: args.items.length, items: mergeInput(args.items) }); },
   },
   {
     name: "match_goods",
+    effect: "local-write",
     description: "按当前供应商实时目录匹配商品；非完全匹配必须由用户确认。",
     schema: { ...supplierShape, items: z.array(itemSchema).min(1), priceSheet: priceSheetSchema },
     async handler(args, context) {
@@ -218,6 +220,7 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "precheck_order",
+    effect: "local-write",
     description: "批量预检采购草稿所需的供应商、仓库、商品和参考价，不执行保存。",
     schema: { orders: z.array(z.object(singleOrderShape)).min(1), priceSheet: priceSheetSchema },
     async handler(args, context) {
@@ -237,6 +240,7 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "save_order",
+    effect: "remote-write",
     description: "保存线上采购草稿并回查验收；不会提交或发起审批。",
     schema: {
       ...singleOrderShape,
@@ -291,7 +295,7 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
         const after = await draftList(context);
         newDraft = after.find((item) => !beforeCodes.has(String(item.orderCode)) && item.enterpriseCode === supplier.enterpriseCode && item.warehouseName === warehouse.warehouseName && String(item.deliveryDate).replace("T", " ").slice(0, 19) === args.deliveryDate);
       }
-      if (!newDraft) return ok({ saved: true, orderCode: null, verification: { passed: false, reason: "new draft was not visible in the list" }, priceComparison });
+      if (!newDraft) return verifiedWrite("Order write was accepted but verification failed", { saved: true, orderCode: null, priceComparison }, { passed: false, reason: "new draft was not visible in the list" });
       const detail = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(newDraft.orderCode)}`, { operation: "read" });
       const verification = {
         passed: Number(detail.json?.data?.status) === 0 && detail.json?.data?.warehouseId == warehouse.warehouseId && detail.json?.data?.receiver === warehouse.receiver && sameGoods(detail.json?.data, result.mappings),
@@ -299,11 +303,12 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
         warehouseName: detail.json?.data?.warehouseName,
         goodsMatched: sameGoods(detail.json?.data, result.mappings),
       };
-      return ok({ saved: true, skippedExisting: false, orderCode: newDraft.orderCode, verification, priceComparison });
+      return verifiedWrite("Order write was accepted but verification failed", { saved: true, skippedExisting: false, orderCode: newDraft.orderCode, priceComparison }, verification);
     },
   },
   {
     name: "delete_order",
+    effect: "remote-delete",
     description: "删除误建的 status=0 草稿；必须 confirm:true，删除后回查草稿列表。",
     schema: { orderCode: z.string().min(1), confirm: z.boolean().default(false) },
     async handler(args, context) {
@@ -317,7 +322,7 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
       await sleep(1200);
       const after = await draftList(context);
       const stillPresent = after.some((item) => item.orderCode === args.orderCode);
-      return ok({ action: "deleted", orderCode: args.orderCode, verification: { passed: !stillPresent, stillPresent } });
+      return verifiedWrite("Draft deletion was accepted but verification failed", { action: "deleted", orderCode: args.orderCode }, { passed: !stillPresent, stillPresent });
     },
   },
 ];
