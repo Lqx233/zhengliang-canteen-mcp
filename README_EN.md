@@ -14,6 +14,22 @@ A local MCP server for authorized Digital Canteen staff. It connects to the offi
 - Provides the original purchasing, ledger, ticket, committee, and warning tools plus an audited capability registry, read-only generic queries, and two-phase write confirmations.
 - Saves purchase orders as drafts by default and requires explicit confirmation for high-impact writes.
 
+## What changed since the previous version
+
+This release addresses the previous “login succeeds but the session cannot be saved, repeated logins, request timeouts, and uncertain write results” failure mode:
+
+- Windows credential-capacity failures for oversized session tokens are handled with an encrypted AES-256-GCM file fallback. Short tokens keep the OS credential-store path, and reads, deletion, and short/long transitions are compatible.
+- Concurrent login/logout and late responses can no longer overwrite a fresh token. Logout cancels unfinished authentication, recovery opens one browser session, and storage failures pause automatic relogin.
+- The request deadline now covers response bodies, rate-limit backoff, and retries. Writes are never automatically replayed, and HTML, non-JSON, or transport errors are kept secret-free.
+- Success requires both HTTP and business success. Token-like text alone no longer triggers authentication recovery, and discovery failures are not converted into empty data.
+- Purchase drafts now verify complete pagination, units, quantities, prices, duplicates, and deletion read-back. Ambiguous or unverifiable outcomes are reported as uncertain.
+- Ledger, morning-check, committee, device, waste, and ticket writes verify submitted fields. Morning checks require actual per-employee records; temperatures, times, and normal results are no longer generated.
+- Confirmation handles are bound to the current Session and authentication revision and expire when authentication changes.
+- The setup wizard now shares concurrent opens, blocks duplicate submissions, preserves existing settings and aliases, and cleans up after startup failures, window closure, timeouts, and partial request bodies.
+- Expanded synthetic regression coverage, with 78 local tests passing across cross-process locks, token transitions, authentication races, business read-back, and secret redaction.
+
+Restart all connector processes after upgrading. Actual oversized-token behavior still needs validation on the target Windows environment.
+
 ## Client Support
 
 This project connects to the clients below through standard stdio MCP. `setup --clients all` covers every client in the table; you can also select one or more clients. “Automatic” means this project can write or generate the relevant configuration—it does not bypass the client's own official confirmation flow.
