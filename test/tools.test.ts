@@ -5,7 +5,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { redacted } from "../src/logger.js";
 import { ALL_TOOLS, createServer } from "../src/server.js";
 import { BASE_TOOLS } from "../src/tools/base.js";
-import { staffTemperature, staffTime } from "../src/tools/ledger.js";
 import { PURCHASE_TOOLS } from "../src/tools/purchase.js";
 import { CAPABILITY_TOOLS, clearPreparedActionsForTests, setPreparedActionTestHooks } from "../src/tools/capabilities.js";
 import { err, ok, verifiedWrite } from "../src/tools/shared.js";
@@ -51,7 +50,7 @@ test("tool output recursively redacts secret fields", () => {
 test("raw_request rejects sensitive URL and body fields before network access", async () => {
   const raw = BASE_TOOLS.find((item) => item.name === "raw_request")!;
   const calls: Array<{ pathname: string; options: unknown }> = [];
-  const context = { session: { call: async (pathname: string, options: unknown) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string, options: unknown) => {
     calls.push({ pathname, options });
     return { httpStatus: 200, json: { status: 0, data: {} } };
   } } } as any;
@@ -82,7 +81,7 @@ test("prepared actions are one-time and verify after execution", async () => {
   const execute = CAPABILITY_TOOLS.find((item) => item.name === "execute_action")!;
   const calls: any[] = [];
   let handled = false;
-  const context = { session: { call: async (pathname: string, options: any) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string, options: any) => {
     calls.push({ pathname, options });
     if (pathname.endsWith("/opinion")) { handled = true; return { httpStatus: 200, json: { status: 0, data: {} } }; }
     return { httpStatus: 200, json: { status: 0, data: { list: [{ id: "synthetic-warning", status: handled ? "待审核" : "未办理", canteenOpinion: handled ? "Synthetic resolution" : undefined, canteenHandler: handled ? "Synthetic Handler" : undefined, canteenHandleDate: handled ? "2099-01-02" : undefined }] } } };
@@ -103,14 +102,14 @@ test("prepared actions are one-time and verify after execution", async () => {
 test("prepared warning action rejects a missing target instead of executing", async () => {
   clearPreparedActionsForTests();
   const prepare = CAPABILITY_TOOLS.find((item) => item.name === "prepare_action")!;
-  const context = { session: { call: async () => ({ httpStatus: 200, json: { status: 0, data: { list: [] } } }) } } as any;
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async () => ({ httpStatus: 200, json: { status: 0, data: { list: [] } } }) } } as any;
   const result = await prepare.handler({ capabilityId: "handle_food_safety_warning", body: { recordId: "missing-warning", opinion: "Synthetic resolution", handler: "Synthetic Handler", handleDate: "2099-01-02" } }, context);
   assert.equal(result.isError, true);
 });
 
 test("query capability reports business failures on HTTP 200", async () => {
   const query = CAPABILITY_TOOLS.find((item) => item.name === "query_capability")!;
-  const context = { session: { call: async () => ({ httpStatus: 200, json: { status: 534, info: "Synthetic permission denied" } }) } } as any;
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async () => ({ httpStatus: 200, json: { status: 534, info: "Synthetic permission denied" } }) } } as any;
   const result = await query.handler({ capabilityId: "canteen_info", params: {} }, context);
   assert.equal(result.isError, true);
 });
@@ -120,7 +119,7 @@ test("expired confirmation handles cannot be executed", async () => {
   let now = 1_000_000;
   setPreparedActionTestHooks({ now: () => now });
   const prepare = CAPABILITY_TOOLS.find((item) => item.name === "prepare_action")!;
-  const context = { session: { call: async () => ({ httpStatus: 200, json: { status: 0, data: { list: [{ id: "synthetic-warning", status: "未办理" }] } } }) } } as any;
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async () => ({ httpStatus: 200, json: { status: 0, data: { list: [{ id: "synthetic-warning", status: "未办理" }] } } }) } } as any;
   const result = await prepare.handler({ capabilityId: "handle_food_safety_warning", body: { recordId: "synthetic-warning", opinion: "Synthetic resolution", handler: "Synthetic Handler", handleDate: "2099-01-02" } }, context);
   now += 10 * 60 * 1000 + 1;
   const execute = CAPABILITY_TOOLS.find((item) => item.name === "execute_action")!;
@@ -133,7 +132,7 @@ test("state changes after preparation block the write", async () => {
   clearPreparedActionsForTests();
   let reads = 0;
   let writes = 0;
-  const context = { session: { call: async (pathname: string) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string) => {
     if (pathname.endsWith("/opinion")) { writes += 1; return { httpStatus: 200, json: { status: 0 } }; }
     reads += 1;
     return { httpStatus: 200, json: { status: 0, data: { list: [{ id: "synthetic-warning", status: reads === 1 ? "未办理" : "待审核" }] } } };
@@ -150,7 +149,7 @@ test("a missing post-write target is an uncertain error", async () => {
   clearPreparedActionsForTests();
   setPreparedActionTestHooks({ wait: async () => undefined });
   let handled = false;
-  const context = { session: { call: async (pathname: string) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string) => {
     if (pathname.endsWith("/opinion")) { handled = true; return { httpStatus: 200, json: { status: 0 } }; }
     return { httpStatus: 200, json: { status: 0, data: { list: handled ? [] : [{ id: "synthetic-warning", status: "未办理" }] } } };
   } } } as any;
@@ -168,7 +167,7 @@ test("concurrent execution consumes a confirmation only once", async () => {
   clearPreparedActionsForTests();
   let handled = false;
   let writes = 0;
-  const context = { session: { call: async (pathname: string) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string) => {
     if (pathname.endsWith("/opinion")) { writes += 1; handled = true; return { httpStatus: 200, json: { status: 0 } }; }
     return { httpStatus: 200, json: { status: 0, data: { list: [{ id: "synthetic-warning", status: handled ? "待审核" : "未办理", canteenOpinion: handled ? "Synthetic resolution" : undefined, canteenHandler: handled ? "Synthetic Handler" : undefined, canteenHandleDate: handled ? "2099-01-02" : undefined }] } } };
   } } } as any;
@@ -184,7 +183,7 @@ test("concurrent execution consumes a confirmation only once", async () => {
 test("query capability validates fields and forwards GET and POST correctly", async () => {
   const query = CAPABILITY_TOOLS.find((item) => item.name === "query_capability")!;
   const calls: any[] = [];
-  const context = { session: { call: async (pathname: string, options: any) => {
+  const context = { session: { revision: 0, ensureToken: async () => "synthetic-unit-test-session", assertRevision: (revision: number) => { assert.equal(revision, 0); }, call: async (pathname: string, options: any) => {
     calls.push({ pathname, options });
     return { httpStatus: 200, json: { status: 0, data: {} } };
   } } } as any;
@@ -220,11 +219,4 @@ test("merge_items combines identical labels and units", async () => {
   const parsed = JSON.parse(result.content[0]!.text);
   assert.equal(parsed.items.length, 1);
   assert.equal(parsed.items[0].saveAmount, 5);
-});
-
-test("generated morning values remain in configured ranges", () => {
-  const temperatures = Array.from({ length: 50 }, (_, index) => Number(staffTemperature(index)));
-  assert.equal(temperatures.every((value) => value >= 36.2 && value <= 37.1), true);
-  const times = Array.from({ length: 30 }, (_, index) => staffTime(index, 30));
-  assert.equal(times.every((value) => value >= "05:30:00" && value < "06:00:00"), true);
 });

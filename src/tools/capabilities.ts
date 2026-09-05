@@ -6,6 +6,7 @@ import { apiSucceeded, err, ok, sleep } from "./shared.js";
 import { findFoodSafetyWarning, verifyWarningAction, type WarningActionInput } from "./warningService.js";
 
 interface PreparedAction {
+  revision: number;
   capabilityId: string;
   body: unknown;
   snapshot: Record<string, unknown>;
@@ -19,7 +20,12 @@ interface ActionAdapter {
   verify(context: ToolContext, body: any): Promise<Record<string, unknown>>;
 }
 
-const prepared = new Map<string, PreparedAction>();
+let preparedBySession = new WeakMap<ToolContext["session"], Map<string, PreparedAction>>();
+function actionsFor(context: ToolContext): Map<string, PreparedAction> {
+  let actions = preparedBySession.get(context.session);
+  if (!actions) { actions = new Map(); preparedBySession.set(context.session, actions); }
+  return actions;
+}
 const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 let actionNow = () => Date.now();
 let actionWait = sleep;
@@ -116,7 +122,7 @@ function digest(value: unknown): string {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
-function prune(): void {
+function prune(prepared: Map<string, PreparedAction>): void {
   const now = actionNow();
   for (const [id, item] of prepared) if (item.expiresAt <= now) prepared.delete(id);
 }
@@ -159,7 +165,8 @@ export const CAPABILITY_TOOLS: ToolDefinition[] = [
     description: "读取并锁定已审计写能力的当前状态，生成一次性确认句柄；不会执行网络写入。",
     schema: { capabilityId: z.string().min(1), body: z.unknown() },
     async handler(args, context) {
-      prune();
+      const prepared = actionsFor(context);
+      prune(prepared);
       const capability = resolveCapability(args.capabilityId);
       if (!capability) return err("Unknown capability");
       if (capability.kind !== "write") return err("Only write capabilities require an action confirmation");
@@ -169,10 +176,13 @@ export const CAPABILITY_TOOLS: ToolDefinition[] = [
       const parsed = adapter.schema.safeParse(args.body);
       if (!parsed.success) return err("Action input validation failed", parsed.error.issues);
       try {
+        await context.session.ensureToken();
+        const revision = context.session.revision;
         const body = structuredClone(parsed.data);
         const snapshot = structuredClone(await adapter.inspect(context, body));
+        context.session.assertRevision(revision);
         const confirmationId = crypto.randomBytes(18).toString("base64url");
-        prepared.set(confirmationId, { capabilityId: capability.id, body, snapshot, expiresAt: actionNow() + CONFIRMATION_TTL_MS });
+        prepared.set(confirmationId, { revision, capabilityId: capability.id, body, snapshot, expiresAt: actionNow() + CONFIRMATION_TTL_MS });
         return ok({ status: "prepared", confirmationId, expiresInSeconds: CONFIRMATION_TTL_MS / 1000, capability: { id: capability.id, label: capability.label, risk: capability.risk, method: capability.method }, actionPreview: body, precondition: snapshot, payloadDigest: digest(body), preconditionDigest: digest(snapshot) });
       } catch (error: any) {
         return err(error?.message ?? "Action preparation failed");
@@ -185,7 +195,8 @@ export const CAPABILITY_TOOLS: ToolDefinition[] = [
     description: "消费一次性确认句柄；执行前重验状态，写入后严格回查。要求 confirm:true。",
     schema: { confirmationId: z.string().min(1), confirm: z.boolean().default(false) },
     async handler(args, context) {
-      prune();
+      const prepared = actionsFor(context);
+      prune(prepared);
       if (args.confirm !== true) return ok({ status: "blocked", message: "Set confirm:true to execute the prepared action." });
       const action = prepared.get(args.confirmationId);
       if (!action) return err("Confirmation is missing, expired, or already consumed");
@@ -194,11 +205,13 @@ export const CAPABILITY_TOOLS: ToolDefinition[] = [
       const adapter = ACTION_ADAPTERS[action.capabilityId];
       if (!capability || !adapter || capability.kind !== "write" || capability.execution !== "confirmable") return err("Prepared capability is no longer executable");
       try {
+        context.session.assertRevision(action.revision);
         await adapter.revalidate(context, action.body, action.snapshot);
+        context.session.assertRevision(action.revision);
       } catch (error: any) {
         return err(error?.message ?? "Prepared action precondition failed");
       }
-      const response = await callCapability(context, capability, { body: action.body });
+      const response = await callCapability(context, capability, { body: action.body, expectedAuthRevision: action.revision });
       if (response.httpStatus >= 400 || !apiSucceeded(response.json)) return err("Prepared action failed", { httpStatus: response.httpStatus, status: response.json?.status, info: response.json?.info });
       try {
         const verification = await adapter.verify(context, action.body);
@@ -212,7 +225,7 @@ export const CAPABILITY_TOOLS: ToolDefinition[] = [
 ];
 
 export function clearPreparedActionsForTests(): void {
-  prepared.clear();
+  preparedBySession = new WeakMap();
   actionNow = () => Date.now();
   actionWait = sleep;
 }

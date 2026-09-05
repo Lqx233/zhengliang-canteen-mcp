@@ -1,3 +1,4 @@
+import { requireResponse } from "./api.js";
 import type { Session } from "./session.js";
 import type { SupplierInfo, WarehouseProfile } from "./types.js";
 
@@ -18,6 +19,7 @@ export class DiscoveryService {
       "/basic/supplyAdmin/getSupplierCustomerList?pageIndex=1&pageSize=200&isSemester=true&status=1&type=1",
       { operation: "read" },
     );
+    requireResponse(response);
     return rows(response.json).map((row) => ({
       enterpriseCode: String(row.code ?? row.enterpriseCode ?? ""),
       enterpriseName: String(row.name ?? row.enterpriseName ?? ""),
@@ -31,11 +33,10 @@ export class DiscoveryService {
       ["/supply/warehouse/findWarehouse", { pageIndex: 1, pageSize: 200 }],
       ["/supply/warehouseDisplay/getUserWarehouse", {}],
     ] as const) {
-      try {
+      {
         const response = await this.session.call(path, { method: "POST", body, operation: "read" });
+        requireResponse(response);
         candidates.push(...rows(response.json));
-      } catch {
-        // Accounts do not always expose both warehouse endpoints.
       }
     }
     const unique = new Map<string, WarehouseProfile>();

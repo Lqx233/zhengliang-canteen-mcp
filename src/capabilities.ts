@@ -92,10 +92,11 @@ export function buildCapabilityPath(capability: Capability, query: Record<string
   return queryString ? `${capability.path}?${queryString}` : capability.path;
 }
 
-export async function callCapability(context: ToolContext, capability: Capability, input: { query?: Record<string, unknown>; body?: unknown }): Promise<any> {
+export async function callCapability(context: ToolContext, capability: Capability, input: { query?: Record<string, unknown>; body?: unknown; expectedAuthRevision?: number }): Promise<any> {
   return context.session.call(buildCapabilityPath(capability, capability.method === "GET" ? input.query : {}), {
     method: capability.method,
     body: capability.method === "POST" ? input.body : undefined,
     operation: capability.kind,
+    expectedAuthRevision: input.expectedAuthRevision,
   });
 }

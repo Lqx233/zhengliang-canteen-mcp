@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { APP_NAME } from "./constants.js";
 
 export function appDataDir(): string {
@@ -28,6 +29,11 @@ export function browserCacheDir(): string {
 
 export function encryptedProfilePath(profile = "default"): string {
   return path.join(appDataDir(), "profiles", `${profile}.enc.json`);
+}
+
+export function encryptedTokenPath(profile = "default"): string {
+  const id = crypto.createHash("sha256").update(profile).digest("hex");
+  return path.join(appDataDir(), "sessions", `${id}.enc.json`);
 }
 
 export function authLockPath(profile = "default"): string {

@@ -1,3 +1,4 @@
+import { sameRecords } from "./verification.js";
 import { z } from "zod";
 import type { ToolContext, ToolDefinition } from "./shared.js";
 import { apiRows, apiSucceeded, err, ok, sleep, verifiedWrite } from "./shared.js";
@@ -92,9 +93,14 @@ export const COMMITTEE_TOOLS: ToolDefinition[] = [
         const saved = await context.session.call("/basic/dietCommittee/updateInfo", { method: "POST", operation: "write", body: { ...term, itemList, key: 1 } });
         if (!apiSucceeded(saved.json)) return err("Diet committee save failed", saved.json?.info);
         await sleep(1800);
-        const after = (await dietTerms(context)).find((item) => item.committeeName === args.semester);
-        const names = new Set((after?.itemList ?? []).map((item: any) => item.name));
-        return verifiedWrite("Diet committee write was accepted but verification failed", { action: "saved", kind: "diet" }, { passed: members.every((member) => names.has(member.name)), memberCount: after?.itemList?.length ?? 0 });
+        let after: any;
+        let passed = false;
+        try {
+          after = (await dietTerms(context)).find((item) => String(item.id) === String(term.id));
+          const expected = itemList.map(({ name, position, representativeType, gender, phoneNo, remarks }) => ({ name, position, representativeType, gender, phoneNo, remarks }));
+          passed = sameRecords(after?.itemList ?? [], expected);
+        } catch { /* Report an accepted but unverified write. */ }
+        return verifiedWrite("Diet committee write was accepted but verification failed", { action: "saved", kind: "diet" }, { passed, memberCount: after?.itemList?.length ?? 0 });
       }
 
       const parsed = z.array(parentMemberSchema).safeParse(args.members);
@@ -124,9 +130,15 @@ export const COMMITTEE_TOOLS: ToolDefinition[] = [
       const saved = await context.session.call("/basic/parentsOversightCommittee/saveCommittee", { method: "POST", operation: "write", body: payload });
       if (!apiSucceeded(saved.json)) return err("Parent committee save failed", saved.json?.info);
       await sleep(1800);
-      const after = await parentMembers(context, String(term.id));
-      const names = new Set(after.map((item) => item.name));
-      return verifiedWrite("Parent committee write was accepted but verification failed", { action: "saved", kind: "parent" }, { passed: members.every((member) => names.has(member.name)), memberCount: after.length });
+      let after: any[] = [];
+      let passed = false;
+      try {
+        after = await parentMembers(context, String(term.id));
+        passed = sameRecords(after, members.map(({ id, committeeId, name, position, phone, remark }) => ({
+          ...(id === null ? {} : { id }), committeeId, name, position, phone, remark,
+        })));
+      } catch { /* Report an accepted but unverified write. */ }
+      return verifiedWrite("Parent committee write was accepted but verification failed", { action: "saved", kind: "parent" }, { passed, memberCount: after.length });
     },
   },
 ];

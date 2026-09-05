@@ -7,7 +7,7 @@
 ## 主要特性
 
 - 首次连接自动打开官方登录页，账号密码只提交给官方页面。
-- 登录 token 保存到 macOS Keychain 或 Windows Credential Manager。
+- 登录 token 优先保存到 macOS Keychain 或 Windows Credential Manager；超长 token 使用本机 AES-256-GCM 加密文件，密钥仍保存在系统凭据库。
 - token 可跨会话复用；服务端判定失效后才重新打开登录页。
 - 学校专属配置使用 AES-256-GCM 加密，密钥存入操作系统凭据库。
 - 动态读取当前账号可见的供应商和仓库，不内置学校、人员或供应商数据。
@@ -174,7 +174,13 @@ MCP 启动后会检查操作系统凭据库。没有有效 token 时，会自动
 2. 登录成功后，MCP 只读取官方页面生成的会话 token。
 3. 浏览器登录上下文立即关闭，账号密码不会写入本项目。
 4. 首次使用会打开本机配置页，用于确认采购人、仓库收货人和台账人员。
-5. 以后启动会复用凭据库中的 token，直到服务端将其判定为过期或撤销。
+5. 以后启动会复用安全存储中的 token，直到服务端将其判定为过期或撤销。
+
+Windows 的单条凭据上限为 2560 个 UTF-16 字节。超过该上限的 token 会自动加密保存到应用数据目录的 `sessions/`；短 token 的存储方式不变。加密文件使用现有配置密钥，退出登录会删除两处 token，但保留配置及其密钥。
+
+如果出现 `TokenStorageError`，表示本机凭据库或文件存储失败，同一进程会暂停自动重登。修复存储访问后，使用 `login(force:true)` 或下面的 `auth login --force` 重试。网络超时不会被当作凭据容量错误处理。
+
+升级后需要重启 MCP 服务，才能加载修复。现场手工补丁的未知加密文件格式不会自动迁移，必要时在官方页面重新登录一次；不需要清空整个系统凭据库。
 
 也可以主动管理登录状态：
 
@@ -200,6 +206,44 @@ zhengliang-canteen-mcp profile configure
 `zhengliang://capabilities` 和 `zhengliang://security` resources 提供当前审计能力与安全边界；`canteen_workflow` prompt 用于引导读优先和确认门控流程。新增写能力默认不开放通用执行，必须使用其专用工具。
 
 `query_capability` 仅接受能力 ID 和经该能力严格校验的 `params`。标记为 `confirmable` 的写能力使用 `prepare_action`/`execute_action`；标记为 `dedicated` 的能力继续使用其专用工具和内置门禁。
+
+## 稳定性与验收约定
+
+- 每次 API 请求（含读取响应体、限流退避与重试）默认共享 30 秒预算。仅明确标记为读取的操作会对限流重试；写入遇到超时、连接中断或非 JSON 响应会提示结果不确定，先回查再决定是否重试。
+- 成功响应必须同时满足 HTTP 成功和业务成功。发现接口失败不会当作空数据；采购、委员会、台账和票证写入需回查提交字段，无法确认时不会报告成功。
+- `auth_status` 在当前进程尚未接受 token 时会联网验证，服务异常会返回错误。退出登录会取消进行中的认证，防止迟到结果重新保存 token。确认句柄绑定当前 Session 和认证版本，重登或退出后需重新准备。
+- 配置窗口复用并发打开请求、预填已有配置并保留商品别名和仓库备注；重复保存会被阻止，关闭窗口或超时会清理浏览器和本机监听端口。
+- 本次升级更换了跨进程存储锁，请重启所有连接器进程。活进程的锁不会因等待时间长而被抢占。
+
+### 晨检接口兼容性变化
+
+`save_morning_check` 必须传入逐员工的实际 `records`，不再接受自动生成体温/时间的 `tempRange`、`timeRange`。历史模板只用于核对员工身份；实际异常值会原样保留。重建当天已有记录仍需 `force:true` 和 `confirm:true`。
+
+以下仅为虚构字段示例，不能作为实际晨检结果提交：
+
+```json
+{
+  "date": "2099-01-02",
+  "records": [{
+    "employeeId": "synthetic-employee",
+    "temperature": 38.1,
+    "attendanceTime": "07:12:00",
+    "attendanceStatus": 0,
+    "isVomiting": 0,
+    "isDiarrhea": 0,
+    "isCough": 1,
+    "isInfection": 0,
+    "decorations": 1,
+    "nailsHair": 1,
+    "overalls": 1,
+    "temperatureStatus": 0,
+    "processResult": "Synthetic abnormal result",
+    "remarks": "Synthetic follow-up"
+  }]
+}
+```
+
+标志字段取 `0` 或 `1`，须使用官方表单对应的实际检查值；`attendanceTime` 为 `HH:mm:ss`。缺少字段、员工重复或身份无法唯一核对时禁止写入。
 
 ## 隐私与安全
 

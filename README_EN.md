@@ -8,7 +8,7 @@ A local MCP server for authorized Digital Canteen staff. It connects to the offi
 
 - Opens the official login page automatically on the first connection.
 - Keeps passwords inside the official page and stores only the resulting session token.
-- Stores tokens in macOS Keychain or Windows Credential Manager for reuse across sessions.
+- Stores tokens in macOS Keychain or Windows Credential Manager; oversized tokens use a local AES-256-GCM file with the key retained in the OS credential store.
 - Encrypts tenant-specific settings with AES-256-GCM; the key stays in the operating-system credential store.
 - Discovers suppliers and warehouses dynamically instead of shipping tenant-specific mappings.
 - Provides the original purchasing, ledger, ticket, committee, and warning tools plus an audited capability registry, read-only generic queries, and two-phase write confirmations.
@@ -176,6 +176,20 @@ At startup, the MCP checks the operating-system credential store. If no valid to
 4. On first use, a local configuration page opens for purchaser, warehouse receiver, and ledger defaults.
 5. Later sessions reuse the stored token until the server expires or revokes it.
 
+Windows credentials have a 2560-byte UTF-16 limit. Larger tokens are encrypted
+under `sessions/` in the application data directory using the existing configuration
+key. Short tokens keep their current storage path. Logout removes both token
+locations while preserving configuration data and its key.
+
+`TokenStorageError` means the credential store or local file storage failed.
+Automatic login stops for the current process. After fixing storage access, retry
+with `login(force:true)` or `auth login --force`. Network timeouts do not trigger
+the capacity fallback.
+
+Restart the MCP service after upgrading. Unknown encrypted formats from manual
+installation patches are not migrated; one official-page login may be required.
+There is no need to clear the entire OS credential store.
+
 Authentication and profile commands:
 
 ```bash
@@ -200,6 +214,20 @@ zhengliang-canteen-mcp profile configure
 The `zhengliang://capabilities` and `zhengliang://security` resources expose the reviewed capability surface and safety boundary. The `canteen_workflow` prompt guides read-first, confirmation-gated use. New writes are not enabled through arbitrary generic execution and must use a dedicated safety-checked tool.
 
 `query_capability` accepts only a capability ID and capability-specific validated `params`. Write capabilities marked `confirmable` use `prepare_action`/`execute_action`; capabilities marked `dedicated` continue to use their named tool and built-in gates.
+
+## Reliability and verification
+
+- Each API request has a default 30-second budget covering response bodies and rate-limit backoff/retries. Only explicitly classified reads retry rate limits. A write interrupted by a timeout, connection failure, or non-JSON response is uncertain: check current state before retrying.
+- Success requires both HTTP and business success. Discovery failures are not empty inventories. Purchase, committee, ledger, and ticket writes are verified against submitted fields; an unverifiable result is not reported as success.
+- `auth_status` validates stored credentials over the network if this process has not accepted them yet; upstream failures remain errors. Logout cancels pending authentication and prevents late token persistence. Confirmation handles are tied to a Session and authentication revision, and must be prepared again after authentication changes.
+- Concurrent configuration requests share one window. Existing fields, aliases, and warehouse remarks are preserved. Duplicate saves are blocked; closing or timing out releases the browser and loopback listener.
+- Restart all connector processes after this storage-lock upgrade. A live process never loses its lock simply because it has held it for a long time.
+
+### Morning-check input change
+
+`save_morning_check` now requires actual per-employee `records`; generated `tempRange` and `timeRange` inputs are no longer supported. Each record requires `employeeId`, numeric `temperature`, `attendanceTime` (`HH:mm:ss`), `attendanceStatus`, `isVomiting`, `isDiarrhea`, `isCough`, `isInfection`, `decorations`, `nailsHair`, `overalls`, `temperatureStatus`, nonempty `processResult`, and `remarks`. Flags must be actual `0`/`1` values corresponding to the official form, not inferred defaults.
+
+Historical templates establish employee identity only; abnormal measurements are preserved. Missing fields, duplicate employees, or ambiguous identities block writes. Rebuilding an existing day still requires both `force:true` and `confirm:true`. See the [synthetic field example](README.md#晨检接口兼容性变化) for the input shape; never submit example measurements as real records.
 
 ## Privacy and Security
 

@@ -1,7 +1,7 @@
-import { ApiClient, isAuthFailure } from "./api.js";
+import { ApiClient, isAuthFailure, requireResponse } from "./api.js";
 import { acquireAuthLock } from "./auth/lock.js";
 import type { BrowserAuthenticator } from "./auth/browserAuth.js";
-import type { SecretStore } from "./auth/tokenStore.js";
+import { TokenStorageError, type SecretStore } from "./auth/tokenStore.js";
 import { DEFAULT_PROFILE } from "./constants.js";
 import { log } from "./logger.js";
 import type { ApiResponse, RequestOptions } from "./types.js";
@@ -13,9 +13,30 @@ export class WriteReplayRequiredError extends Error {
   }
 }
 
+export class AuthenticationChangedError extends Error {
+  constructor() {
+    super("Authentication changed or was cancelled; prepare the operation again.");
+    this.name = "AuthenticationChangedError";
+  }
+}
+
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new AuthenticationChangedError());
+    if (signal.aborted) { pending.catch(() => undefined); abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export class Session {
   private token: string | null = null;
   private authPromise: Promise<string> | null = null;
+  private storageFailure: TokenStorageError | null = null;
+  private controller = new AbortController();
+  private epoch = 0;
+  private authRevision = 0;
+  private logoutPromise: Promise<void> | null = null;
 
   constructor(
     private readonly secrets: SecretStore,
@@ -24,57 +45,93 @@ export class Session {
     private readonly profile = DEFAULT_PROFILE,
   ) {}
 
+  get revision(): number { return this.authRevision; }
+
+  assertRevision(expected: number): void {
+    if (expected !== this.authRevision || this.controller.signal.aborted) throw new AuthenticationChangedError();
+  }
+
   bootstrap(): void {
     void this.ensureToken().catch((error) => log("auth_bootstrap_failed", { errorType: error?.name ?? "Error" }));
   }
 
   async status(): Promise<{ authenticated: boolean; profile: string }> {
-    const token = this.token ?? await this.secrets.getToken(this.profile);
-    return { authenticated: Boolean(token), profile: this.profile };
+    if (this.storageFailure) throw this.storageFailure;
+    if (this.logoutPromise || this.authPromise) return { authenticated: false, profile: this.profile };
+    if (this.token) return { authenticated: true, profile: this.profile };
+    const epoch = this.epoch;
+    const stored = await this.secrets.getToken(this.profile);
+    if (!stored) return { authenticated: false, profile: this.profile };
+    const response = await this.api.request("/auth/groups/getUserGroupAuth", { token: stored, operation: "read" });
+    if (epoch !== this.epoch) throw new AuthenticationChangedError();
+    if (isAuthFailure(response)) return { authenticated: false, profile: this.profile };
+    requireResponse(response);
+    return { authenticated: true, profile: this.profile };
   }
 
   async ensureToken(force = false): Promise<string> {
+    if (this.logoutPromise) await this.logoutPromise;
+    if (!force && this.storageFailure) throw this.storageFailure;
+    if (this.authPromise) return this.authPromise;
     if (!force && this.token) return this.token;
-    if (!this.authPromise) {
-      this.authPromise = this.authenticate(force).finally(() => {
-        this.authPromise = null;
-      });
-    }
-    return this.authPromise;
+    return this.startAuthentication(force);
   }
 
-  private async authenticate(force: boolean): Promise<string> {
-    if (!force) {
-      const stored = await this.secrets.getToken(this.profile);
-      if (stored) {
-        const validation = await this.api.request("/auth/groups/getUserGroupAuth", { token: stored });
-        if (!isAuthFailure(validation)) {
-          this.token = stored;
-          log("stored_token_accepted");
-          return stored;
-        }
-        await this.secrets.deleteToken(this.profile);
-      }
+  private startAuthentication(force: boolean, failedToken?: string): Promise<string> {
+    if (this.authPromise) return this.authPromise;
+    if (force || failedToken) {
+      this.authRevision++;
+      this.token = null;
     }
-
-    const release = await acquireAuthLock(this.profile);
-    try {
-      if (!force) {
-        const tokenFromOtherProcess = await this.secrets.getToken(this.profile);
-        if (tokenFromOtherProcess) {
-          const validation = await this.api.request("/auth/groups/getUserGroupAuth", { token: tokenFromOtherProcess });
-          if (!isAuthFailure(validation)) {
-            this.token = tokenFromOtherProcess;
-            return tokenFromOtherProcess;
-          }
-          await this.secrets.deleteToken(this.profile);
-        }
+    if (force) this.storageFailure = null;
+    this.controller.abort();
+    this.controller = new AbortController();
+    const signal = this.controller.signal;
+    const epoch = ++this.epoch;
+    const pending = this.authenticate(force, signal, failedToken).catch((error: unknown) => {
+      if (epoch === this.epoch && error instanceof TokenStorageError) {
+        this.storageFailure = error;
+        this.token = null;
       }
-      const token = await this.browserAuth.login();
-      const validation = await this.api.request("/auth/groups/getUserGroupAuth", { token });
-      if (isAuthFailure(validation)) throw new Error("The captured browser session was rejected by the API");
+      throw error;
+    }).finally(() => {
+      if (this.authPromise === pending) this.authPromise = null;
+    });
+    this.authPromise = pending;
+    return pending;
+  }
+
+  private async authenticate(force: boolean, signal: AbortSignal, failedToken?: string): Promise<string> {
+    const release = await acquireAuthLock(this.profile, signal);
+    const check = () => { if (signal.aborted) throw new AuthenticationChangedError(); };
+    try {
+      check();
+      if (!force) {
+        const stored = await this.secrets.getToken(this.profile);
+        check();
+        if (stored && stored !== failedToken) {
+          const validation = await abortable(this.api.request("/auth/groups/getUserGroupAuth", { token: stored, operation: "read", signal }), signal);
+          check();
+          if (!isAuthFailure(validation)) {
+            requireResponse(validation);
+            this.token = stored;
+            this.authRevision++;
+            log("stored_token_accepted");
+            return stored;
+          }
+        }
+        if (stored) await this.secrets.deleteToken(this.profile);
+      }
+      check();
+      const token = await abortable(this.browserAuth.login(signal), signal);
+      check();
+      const validation = await abortable(this.api.request("/auth/groups/getUserGroupAuth", { token, operation: "read", signal }), signal);
+      check();
+      requireResponse(validation);
       await this.secrets.setToken(token, this.profile);
+      check();
       this.token = token;
+      this.authRevision++;
       log("new_token_stored");
       return token;
     } finally {
@@ -83,22 +140,47 @@ export class Session {
   }
 
   async logout(): Promise<void> {
+    if (this.logoutPromise) return this.logoutPromise;
+    this.epoch++;
+    this.authRevision++;
+    this.controller.abort();
     this.token = null;
-    await this.secrets.deleteToken(this.profile);
-    log("token_deleted");
+    const pending = (async () => {
+      const release = await acquireAuthLock(this.profile);
+      try {
+        await this.secrets.deleteToken(this.profile);
+        this.storageFailure = null;
+        log("token_deleted");
+      } catch (error) {
+        if (error instanceof TokenStorageError) this.storageFailure = error;
+        throw error;
+      } finally { await release(); }
+    })().finally(() => { if (this.logoutPromise === pending) this.logoutPromise = null; });
+    this.logoutPromise = pending;
+    return pending;
   }
 
   async call(pathname: string, options: RequestOptions = {}): Promise<ApiResponse<any>> {
     const operation = options.operation ?? (options.method === "POST" ? "write" : "read");
     const token = await this.ensureToken();
-    let response = await this.api.requestWithRetry(pathname, { ...options, token });
-    if (!isAuthFailure(response)) return response;
-
-    this.token = null;
-    await this.secrets.deleteToken(this.profile);
-    const renewed = await this.ensureToken(true);
+    if (options.expectedAuthRevision !== undefined) this.assertRevision(options.expectedAuthRevision);
+    const revision = this.authRevision;
+    const response = await this.api.requestWithRetry(pathname, { ...options, operation, token });
+    if (!isAuthFailure(response)) { requireResponse(response); return response; }
+    if (this.storageFailure) throw this.storageFailure;
+    if (this.controller.signal.aborted || this.logoutPromise) throw new AuthenticationChangedError();
+    if (options.expectedAuthRevision !== undefined) throw new AuthenticationChangedError();
+    // A late response can reuse a newer token; it must never delete that token.
+    let renewed: string;
+    if (this.token && this.token !== token) renewed = this.token;
+    else if (this.authPromise) renewed = await this.authPromise;
+    else {
+      if (revision !== this.authRevision) throw new AuthenticationChangedError();
+      renewed = await this.startAuthentication(false, token);
+    }
     if (operation === "write") throw new WriteReplayRequiredError();
-    response = await this.api.requestWithRetry(pathname, { ...options, token: renewed });
-    return response;
+    const retried = await this.api.requestWithRetry(pathname, { ...options, operation, token: renewed });
+    requireResponse(retried);
+    return retried;
   }
 }

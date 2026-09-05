@@ -59,6 +59,7 @@ function field(label, name, value = '', type = 'text') {
 function addWarehouse(item = {}) {
   const row = document.createElement('div');
   row.className = 'warehouse';
+  row.dataset.remark = item.remark ?? '';
   row.append(field('仓库名称', 'warehouseName', item.warehouseName));
   row.append(field('仓库编号', 'warehouseId', item.warehouseId));
   row.append(field('收货人', 'receiver', item.receiver));
@@ -82,7 +83,20 @@ function addWarehouse(item = {}) {
 async function load() {
   const response = await fetch('/api/discovery', { headers: { 'X-Setup-Nonce': nonce } });
   const data = await response.json();
-  (data.warehouses.length ? data.warehouses : [{}]).forEach(addWarehouse);
+  if (!response.ok) throw new Error('Discovery failed');
+  const profile = data.profile;
+  const rows = profile?.warehouses ?? data.warehouses;
+  (rows.length ? rows : [{}]).forEach(addWarehouse);
+  if (profile) {
+    const values = { ...profile, ...profile.ledgers };
+    for (const [key, value] of Object.entries(values)) {
+      const input = form.elements.namedItem(key);
+      if (input && typeof value !== 'object') input.value = String(value);
+    }
+    quickToggle.checked = profile.wasteQuickFill?.enabled === true;
+    quickFields.hidden = !quickToggle.checked;
+    for (const key of ['foodWaste', 'prepWaste', 'otherWaste']) form.elements.namedItem(key).value = String(profile.wasteQuickFill?.[key] ?? 0);
+  }
 }
 
 quickToggle.addEventListener('change', () => { quickFields.hidden = !quickToggle.checked; });
@@ -91,10 +105,14 @@ document.querySelector('#add-warehouse').addEventListener('click', () => addWare
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   status.textContent = '';
+  const submit = document.querySelector('#submit');
+  if (submit.disabled) return;
+  submit.disabled = true;
+  try {
   const values = Object.fromEntries(new FormData(form));
   const warehouseRows = [...warehouses.querySelectorAll('.warehouse')].map((row) => {
     const get = (name) => row.querySelector('[name="' + name + '"]').value.trim();
-    return { warehouseId: get('warehouseId'), warehouseName: get('warehouseName'), receiver: get('receiver'), receiverPhone: get('receiverPhone'), nutrition: Number(get('nutrition')), remark: get('warehouseName') };
+    return { warehouseId: get('warehouseId'), warehouseName: get('warehouseName'), receiver: get('receiver'), receiverPhone: get('receiverPhone'), nutrition: Number(get('nutrition')), remark: row.dataset.remark || get('warehouseName') };
   });
   const payload = {
     version: 1,
@@ -109,10 +127,11 @@ form.addEventListener('submit', async (event) => {
   };
   const response = await fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Setup-Nonce': nonce }, body: JSON.stringify(payload) });
   const result = await response.json();
-  if (!response.ok) { status.textContent = result.error || '保存失败'; return; }
+  if (!response.ok) throw new Error(result.error || '保存失败');
   document.querySelector('#submit').disabled = true;
   status.style.color = '#16795c';
   status.textContent = '配置已加密保存，可以关闭此窗口。';
+  } catch (error) { status.textContent = error.message || '保存失败，请重试'; submit.disabled = false; }
 });
 
 load().catch(() => { status.textContent = '无法读取系统配置，请检查登录状态。'; });

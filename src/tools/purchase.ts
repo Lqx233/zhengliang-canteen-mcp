@@ -1,3 +1,5 @@
+import { requireResponse } from "../api.js";
+import { matchesFields, sameRecords } from "./verification.js";
 import { z } from "zod";
 import { findWarehouse } from "../config/profile.js";
 import type { SupplierInfo, TenantProfile } from "../types.js";
@@ -63,6 +65,12 @@ function mergeInput(items: InputItem[]) {
     const saveUnit = options.saveUnit ?? unit;
     const saveAmount = Number(options.saveAmount ?? amount);
     const key = `${label.trim()}::${saveUnit}`;
+    const previous = merged.get(key);
+    if (previous && (previous.requestedUnit !== unit || previous.conversion !== options.conversion ||
+      previous.priceOverride !== options.priceOverride ||
+      JSON.stringify(previous.confirmedGoods ?? null) !== JSON.stringify(options.confirmedGoods ?? null))) {
+      throw new Error("Conflicting goods, prices or conversions cannot be merged; provide separate unambiguous items");
+    }
     const current = merged.get(key) ?? {
       label: label.trim(), requestedAmount: 0, requestedUnit: unit, saveAmount: 0, saveUnit,
       conversion: options.conversion, priceOverride: options.priceOverride, modelSuggestions: [], confirmedGoods: options.confirmedGoods, rememberAlias: options.rememberAlias === true,
@@ -88,9 +96,10 @@ async function resolveGoods(context: ToolContext, supplier: SupplierInfo, profil
     const confirmed = item.confirmedGoods ?? (alias ? { code: alias.goodsCode, name: alias.goodsName, unit: alias.unit } : undefined);
     const search = confirmed?.name ?? item.label;
     const catalog = await queryCatalog(context, supplier, search);
-    let selected = confirmed
-      ? catalog.find((goods) => String(goods.code ?? goods.goodsCode) === confirmed.code && goods.name === confirmed.name && goods.unit === confirmed.unit)
-      : catalog.find((goods) => goods.name === item.label && goods.unit === item.saveUnit);
+    const exactMatches = catalog.filter((goods) => confirmed
+      ? String(goods.code ?? goods.goodsCode) === confirmed.code && goods.name === confirmed.name && goods.unit === confirmed.unit && goods.unit === item.saveUnit
+      : goods.name === item.label && goods.unit === item.saveUnit);
+    const selected = exactMatches.length === 1 ? exactMatches[0] : undefined;
 
     const candidates = [...catalog];
     if (!selected && !confirmed) {
@@ -185,17 +194,46 @@ const singleOrderShape = {
 };
 
 async function draftList(context: ToolContext) {
-  const response = await context.session.call("/supply/order/getOrderList", {
-    method: "POST", operation: "read", body: { pageIndex: 1, pageSize: 100, statusList: [0], orderGoodsType: 1, orderSource: 0 },
-  });
-  if (!apiSucceeded(response.json)) throw new Error(`Draft list failed: ${response.json?.info ?? response.json?.status}`);
-  return apiRows(response.json);
+  const result: any[] = [];
+  const seen = new Set<string>();
+  const pageSize = 100;
+  for (let pageIndex = 1; pageIndex <= 100; pageIndex++) {
+    const response = await context.session.call("/supply/order/getOrderList", {
+      method: "POST", operation: "read", body: { pageIndex, pageSize, statusList: [0], orderGoodsType: 1, orderSource: 0 },
+    });
+    requireResponse(response);
+    const rows = apiRows(response.json);
+    const totalValue = response.json?.data?.totalCount ?? response.json?.data?.total;
+    const total = totalValue === undefined ? undefined : Number(totalValue);
+    if (total !== undefined && (!Number.isInteger(total) || total < 0)) throw new Error("Invalid draft pagination total");
+    for (const row of rows) {
+      const code = String(row.orderCode ?? "");
+      if (!code || seen.has(code)) throw new Error("Draft pagination was incomplete or repeated");
+      seen.add(code); result.push(row);
+    }
+    if (total !== undefined && result.length === total) return result;
+    if (rows.length < pageSize) {
+      if (total !== undefined && result.length !== total) throw new Error("Draft pagination was incomplete");
+      return result;
+    }
+  }
+  throw new Error("Draft lookup exceeded the safe pagination limit");
 }
 
 function sameGoods(detail: any, mappings: any[]): boolean {
-  const actual = detail?.orderGoodsList ?? [];
-  return actual.length === mappings.length && mappings.every((wanted) => actual.some((item: any) =>
-    String(item.code ?? item.goodsCode) === wanted.selectedCode && item.unit === wanted.selectedUnit && Math.abs(Number(item.amount) - Number(wanted.saveAmount)) < 0.0001));
+  if (!Array.isArray(detail?.orderGoodsList)) return false;
+  return sameRecords(detail.orderGoodsList.map((item: any) => ({
+    code: String(item.code ?? item.goodsCode ?? ""), unit: item.unit,
+    amount: item.amount, price: item.price ?? item.unitPrice,
+  })), mappings.map((wanted) => ({ code: wanted.selectedCode, unit: wanted.selectedUnit, amount: wanted.saveAmount, price: wanted.selectedPrice })));
+}
+
+function sameOrder(detail: any, expected: any, mappings: any[]): boolean {
+  return matchesFields(detail, { status: 0, enterpriseCode: expected.enterpriseCode,
+    warehouseId: expected.warehouseId, receiver: expected.receiver, receiverPhone: expected.receiverPhone,
+    buyer: expected.buyer, buyerPhone: expected.buyerPhone, purpose: expected.purpose,
+    nutrition: expected.nutrition, remark: expected.remark,
+  }) && String(detail?.deliveryDate ?? "").replace("T", " ").slice(0, 19) === expected.deliveryDate && sameGoods(detail, mappings);
 }
 
 export const PURCHASE_TOOLS: ToolDefinition[] = [
@@ -259,16 +297,6 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
       const priceComparison = comparePrices(supplier, result.mappings, args.priceSheet);
       if (priceComparison?.reviewRequired && args.confirmPriceReview !== true) return err("Reference-price review is required", priceComparison);
 
-      const before = await draftList(context);
-      const beforeCodes = new Set(before.map((item) => String(item.orderCode)));
-      const candidates = before.filter((item) => (item.enterpriseCode === supplier.enterpriseCode || item.enterpriseName === supplier.enterpriseName) && item.warehouseName === warehouse.warehouseName && String(item.deliveryDate).replace("T", " ").slice(0, 19) === args.deliveryDate);
-      if (args.skipIfExists !== false) {
-        for (const candidate of candidates) {
-          const detail = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(candidate.orderCode)}`, { operation: "read" });
-          if (sameGoods(detail.json?.data, result.mappings)) return ok({ saved: false, skippedExisting: true, orderCode: candidate.orderCode, verification: { passed: true } });
-        }
-      }
-
       const payload = {
         enterpriseCode: supplier.enterpriseCode,
         storeCode: supplier.storeCode,
@@ -286,24 +314,40 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
         stallId: 0,
         goodsList: result.goodsList,
       };
+
+      const before = await draftList(context);
+      const beforeCodes = new Set(before.map((item) => String(item.orderCode)));
+      const candidates = before.filter((item) => (item.enterpriseCode === supplier.enterpriseCode || item.enterpriseName === supplier.enterpriseName) && item.warehouseName === warehouse.warehouseName && String(item.deliveryDate).replace("T", " ").slice(0, 19) === args.deliveryDate);
+      if (args.skipIfExists !== false) {
+        for (const candidate of candidates) {
+          const detail = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(candidate.orderCode)}`, { operation: "read" });
+          requireResponse(detail);
+          if (sameOrder(detail.json?.data, payload, result.mappings)) return ok({ saved: false, skippedExisting: true, orderCode: candidate.orderCode, verification: { passed: true } });
+        }
+      }
+
       const saved = await context.session.call("/supply/order/saveOrder", { method: "POST", operation: "write", body: payload });
       if (!apiSucceeded(saved.json)) return err("Save order failed", saved.json?.info ?? saved.json?.status);
 
-      let newDraft: any;
-      for (let attempt = 0; attempt < 3 && !newDraft; attempt += 1) {
-        await sleep(1500 + attempt * 500);
-        const after = await draftList(context);
-        newDraft = after.find((item) => !beforeCodes.has(String(item.orderCode)) && item.enterpriseCode === supplier.enterpriseCode && item.warehouseName === warehouse.warehouseName && String(item.deliveryDate).replace("T", " ").slice(0, 19) === args.deliveryDate);
+      try {
+        let matches: any[] = [];
+        for (let attempt = 0; attempt < 3 && !matches.length; attempt++) {
+          await sleep(1500 + attempt * 500);
+          const after = await draftList(context);
+          const candidates = after.filter((item) => !beforeCodes.has(String(item.orderCode)) && item.enterpriseCode === supplier.enterpriseCode && item.warehouseName === warehouse.warehouseName);
+          matches = [];
+          for (const candidate of candidates) {
+            const detail = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(candidate.orderCode)}`, { operation: "read" });
+            requireResponse(detail);
+            if (sameOrder(detail.json?.data, payload, result.mappings)) matches.push(candidate);
+          }
+        }
+        return verifiedWrite("Order write was accepted but could not be uniquely verified", {
+          saved: true, skippedExisting: false, orderCode: matches.length === 1 ? matches[0].orderCode : null, priceComparison,
+        }, { passed: matches.length === 1, matchingDraftCount: matches.length });
+      } catch {
+        return verifiedWrite("Order write was accepted but verification could not be completed", { saved: true }, { passed: false });
       }
-      if (!newDraft) return verifiedWrite("Order write was accepted but verification failed", { saved: true, orderCode: null, priceComparison }, { passed: false, reason: "new draft was not visible in the list" });
-      const detail = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(newDraft.orderCode)}`, { operation: "read" });
-      const verification = {
-        passed: Number(detail.json?.data?.status) === 0 && detail.json?.data?.warehouseId == warehouse.warehouseId && detail.json?.data?.receiver === warehouse.receiver && sameGoods(detail.json?.data, result.mappings),
-        status: detail.json?.data?.status,
-        warehouseName: detail.json?.data?.warehouseName,
-        goodsMatched: sameGoods(detail.json?.data, result.mappings),
-      };
-      return verifiedWrite("Order write was accepted but verification failed", { saved: true, skippedExisting: false, orderCode: newDraft.orderCode, priceComparison }, verification);
     },
   },
   {
@@ -314,15 +358,20 @@ export const PURCHASE_TOOLS: ToolDefinition[] = [
     async handler(args, context) {
       if (args.confirm !== true) return ok({ action: "blocked", message: "Set confirm:true to delete a draft." });
       const before = await context.session.call(`/supply/order/getOrder?orderCode=${encodeURIComponent(args.orderCode)}`, { operation: "read" });
+      requireResponse(before);
       const detail = before.json?.data;
       if (!detail) return err("Order not found");
       if (Number(detail.status) !== 0) return err("Only status=0 drafts can be deleted");
       const deleted = await context.session.call(`/supply/order/delOrder?orderCode=${encodeURIComponent(args.orderCode)}`, { method: "GET", operation: "write" });
       if (!apiSucceeded(deleted.json)) return err("Draft deletion failed", deleted.json?.info);
       await sleep(1200);
-      const after = await draftList(context);
-      const stillPresent = after.some((item) => item.orderCode === args.orderCode);
-      return verifiedWrite("Draft deletion was accepted but verification failed", { action: "deleted", orderCode: args.orderCode }, { passed: !stillPresent, stillPresent });
+      try {
+        const after = await draftList(context);
+        const stillPresent = after.some((item) => item.orderCode === args.orderCode);
+        return verifiedWrite("Draft deletion was accepted but verification failed", { action: "deleted", orderCode: args.orderCode }, { passed: !stillPresent, stillPresent });
+      } catch {
+        return verifiedWrite("Draft deletion was accepted but verification could not be completed", { action: "deleted" }, { passed: false });
+      }
     },
   },
 ];

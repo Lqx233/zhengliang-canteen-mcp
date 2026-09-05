@@ -1,3 +1,5 @@
+import { responseSucceeded } from "../api.js";
+import { sameRecords } from "./verification.js";
 import { z } from "zod";
 import type { ToolDefinition } from "./shared.js";
 import { apiRows, apiSucceeded, err, ok, sleep, verifiedWrite } from "./shared.js";
@@ -111,22 +113,16 @@ export const TICKET_TOOLS: ToolDefinition[] = [
       const saved = await context.session.call("/supply/order/updOrderTicket/old", { method: "POST", operation: "write", body: payload });
       if (!apiSucceeded(saved.json)) return err("Ticket update failed", saved.json?.info);
       await sleep(1800);
-      const after = await context.session.call(path, { operation: "read" });
-      const certificates = flattenCertificates(after.json?.data ?? {});
-      const expectedCertificates = payload.certificateList;
-      const expectedIdentities: string[] = expectedCertificates.map(certificateIdentity).filter((value: string | null): value is string => Boolean(value));
-      const actualIdentities = new Set(certificates.map(certificateIdentity).filter((value: string | null): value is string => Boolean(value)));
-      const checks = {
-        querySucceeded: apiSucceeded(after.json),
-        certificateCount: certificates.length === expectedCertificates.length,
-        certificateIdentities: expectedIdentities.every((value) => actualIdentities.has(value)),
-      };
-      return verifiedWrite("Ticket update was accepted but verification failed", { action: "updated", ...target }, {
-        passed: Object.values(checks).every(Boolean),
-        checks,
-        certificateCount: certificates.length,
-        ticketTotal: after.json?.data?.ticketTotal ?? certificates.length,
-      });
+      let passed = false;
+      let certificateCount = 0;
+      try {
+        const after = await context.session.call(path, { operation: "read" });
+        const certificates = flattenCertificates(after.json?.data ?? {});
+        certificateCount = certificates.length;
+        passed = responseSucceeded(after) && sameRecords(certificates, payload.certificateList) &&
+          sameRecords(after.json?.data?.invoiceList ?? [], payload.invoiceList);
+      } catch { /* Report an accepted but unverified write. */ }
+      return verifiedWrite("Ticket update was accepted but verification failed", { action: "updated", ...target }, { passed, certificateCount });
     },
   },
 ];

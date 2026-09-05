@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "npm run build && node --test build/test/auth.test.js build/test/tools.test.js build/test/vault.test.js build/test/setup.test.js test/site-audit.test.mjs",
+    "test": "npm run build && node --test build/test/auth.test.js build/test/tools.test.js build/test/vault.test.js build/test/setup.test.js build/test/stability.test.js test/site-audit.test.mjs",
     "privacy": "node scripts/privacy-audit.mjs .",
     "audit:site": "node scripts/site-audit.mjs",
     "verify": "npm run check && npm run test && npm run privacy",

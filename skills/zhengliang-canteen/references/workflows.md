@@ -13,7 +13,8 @@
 - Query the record for the requested date before creating a daily entry.
 - Reuse a recent complete template only after checking that its fields are compatible with the current ledger type.
 - Never fabricate employees, quantities, temperatures, times, attachments, or disposal evidence. Synthetic values are for tests only.
-- Report whether the post-write record was found and which fields were verified.
+- Morning checks require actual per-employee `records` (see README input schema). Templates identify employees only; do not derive clinical results, temperatures, or times from them. Missing or ambiguous employee records block saving. Existing-day rebuilds require both `force:true` and `confirm:true`.
+- Report whether the post-write record was found and which submitted fields were verified, including identity and actual quantities.
 
 ## Warnings and committees
 
@@ -24,6 +25,7 @@
 ## Failure handling
 
 - A refreshed session may retry reads, but never replays a write automatically.
-- On rate limiting, use bounded backoff and report that the result may be delayed.
+- Only explicitly classified reads retry rate limits, within a 30-second total API budget including response bodies and backoff. Never automatically resend writes after transport failures.
+- Authentication changes invalidate prepared confirmation handles. Prepare again after logging in or out.
 - On an unexpected response shape, preserve the HTTP status and safe status/info fields and stop; do not pass through raw HTML or headers.
 - A write accepted by the server but not found with the expected fields during verification is uncertain, not successful. Report it once and do not retry the write.

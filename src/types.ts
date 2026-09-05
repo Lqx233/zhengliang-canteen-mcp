@@ -55,6 +55,9 @@ export interface RequestOptions {
   body?: unknown;
   token?: string;
   operation?: OperationKind;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  expectedAuthRevision?: number;
 }
 
 export interface ToolResult {
